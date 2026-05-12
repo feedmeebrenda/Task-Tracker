@@ -201,6 +201,11 @@
     .team-Support      { background: #d1fae5; color: #065f46; }
     .team-DataChecking { background: #ede9fe; color: #5b21b6; }
     .team-Other        { background: #f0f0f5; color: #555; }
+    .team-ENRedemption { background: #fef3c7; color: #92400e; }
+    .team-ENSupport    { background: #d1fae5; color: #065f46; }
+    .team-Translations { background: #fce7f3; color: #9d174d; }
+    .team-Management   { background: #f0f0f5; color: #374151; }
+    .team-Unassigned   { background: #f0f0f5; color: #aaa; }
 
     .type-badge {
       display: inline-block;
@@ -810,6 +815,25 @@
      CONSTANTS
   ══════════════════════════════════════════ */
   const ADMIN_PASSWORD = 'noctua2024';
+
+  const TEAM_MAP = {
+    'Sandy Gadrinab':'Approval','Rhain Mitche Villanueva':'EN Support',
+    'Regine Albesa':'Approval','Phoebe Grace II Olayvar':'Approval',
+    'Paul Sherwin Diolazo':'Approval','Mel Mark Adriano':'Approval',
+    'Maricor Villaluz':'Approval','Klarence Valdez':'Approval',
+    'Jumana Bulyoc':'EN Support','John Joseph Apolinar':'EN Redemption',
+    'Jessa De Castro':'Approval','Janice Dapuyen':'Management',
+    'Jan Caesar Ceprado':'Approval','Elyzah Mareeh Pascual':'Approval',
+    'Cherry Rivera':'Approval','Charisse Labian':'Approval',
+    'Camille Princess Faye Muñoz':'Approval','Bray Bugarin':'Approval',
+    'Bernard Ryan Licup':'EN Support','Anna Rose Indina':'Approval',
+    'Ann Fadol':'Approval','Jherina Cavite':'EN Redemption',
+    'Theddy Lobo':'EN Redemption','Mari Joanne Pascual':'EN Redemption',
+    'Rizanel Mordeno':'EN Redemption','Alyssa Diones':'EN Redemption',
+    'Lucia Goodwin':'Translations','April Lapointe Hadwin':'Translations',
+    'Milyn Lou Sisbreno':'Approval','May Villaflores':'EN Support',
+    'Jeffrey Meneses':'EN Redemption','Chau Ngo Bich':'EN Redemption',
+  };
   const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun', 'reports']);
   const TEAMS = ['Redemption','Approval','Support','Data Checking'];
 
@@ -1494,6 +1518,8 @@
     fls.forEach(f => { nameToTeam[f.name.toLowerCase()] = f.team || 'Other'; });
 
     function getTeam(name) {
+      const entry = Object.entries(TEAM_MAP).find(([k]) => k.toLowerCase() === name.toLowerCase());
+      if (entry) return entry[1];
       return nameToTeam[name.toLowerCase()] || 'Unassigned';
     }
 
