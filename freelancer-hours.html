@@ -444,6 +444,7 @@
         <button class="tab-btn" data-tab="freelancers">Freelancers</button>
         <button class="tab-btn" data-tab="payrun">Pay Run</button>
         <button class="tab-btn" data-tab="add-freelancer">+ Add Freelancer</button>
+      <button class="tab-btn" data-tab="reports">Reports</button>
       </div>
       <button id="admin-lock-btn" class="btn-ghost" style="display:none" onclick="lockAdmin()">🔒 Lock</button>
     </div>
@@ -472,10 +473,7 @@
             <option value="">— select task type —</option>
             <option value="hourly">Hourly Tasks</option>
             <option value="adhoc">Adhoc Projects</option>
-            <option value="approval-au">Approval (AU)</option>
-            <option value="approval-ca">Approval (CA)</option>
-            <option value="approval-us">Approval (US)</option>
-            <option value="approval-email">Approval (Email)</option>
+            <option value="approval">Approval</option>
           </select>
           <div class="rate-hint" id="rate-hint"></div>
 
@@ -756,6 +754,41 @@
     </div>
   </div>
 
+  <!-- ═══ TAB: REPORTS ═══ -->
+  <div class="tab-panel" id="tab-reports">
+    <div style="max-width:1100px;margin:0 auto;padding-top:8px">
+      <div class="fl-tab-header"><h2>Upwork Cost Reconciliation</h2></div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label>Upwork Transaction Export (CSV)</label>
+            <div class="file-upload" id="csv-upload-area" style="padding:12px 16px;margin-bottom:0;text-align:left;display:flex;align-items:center;gap:10px">
+              <input type="file" id="csv-file" accept=".csv" />
+              <span style="font-size:1.4rem">📊</span>
+              <span id="csv-file-label" style="font-size:0.88rem;color:#6e6e73">Click to upload CSV</span>
+            </div>
+          </div>
+          <div>
+            <label>From</label>
+            <input type="date" id="rpt-from" style="margin-bottom:0;width:auto" />
+          </div>
+          <div>
+            <label>To</label>
+            <input type="date" id="rpt-to" style="margin-bottom:0;width:auto" />
+          </div>
+          <button class="btn" style="width:auto;padding:12px 24px;margin-bottom:2px" onclick="runReport()">Generate Report</button>
+        </div>
+      </div>
+
+      <div id="rpt-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">Upload a CSV file and click Generate Report.</div>
+      <div id="rpt-results" style="display:none">
+        <div id="rpt-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
+        <div id="rpt-teams"></div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /#app -->
 
 <script>
@@ -777,7 +810,7 @@
      CONSTANTS
   ══════════════════════════════════════════ */
   const ADMIN_PASSWORD = 'noctua2024';
-  const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun', 'add-freelancer']);
+  const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun', 'reports']);
   const TEAMS = ['Redemption','Approval','Support','Data Checking'];
 
   /* ══════════════════════════════════════════
@@ -831,9 +864,7 @@
   }
 
   function taskTypeLabel(t) {
-    return { hourly:'Hourly', adhoc:'Adhoc', 'approval-au':'Approval (AU)',
-             'approval-ca':'Approval (CA)', 'approval-us':'Approval (US)',
-             'approval-email':'Approval (Email)' }[t] || t;
+    return { hourly:'Hourly', adhoc:'Adhoc', approval:'Approval' }[t] || t;
   }
 
   function typeBadgeClass(t) {
@@ -915,14 +946,10 @@
      TASK TYPE CONDITIONAL LOGIC
   ══════════════════════════════════════════ */
   const ACTION_COUNT_LABELS = {
-    'hourly':'Hours Worked', 'adhoc':'Project Amount ($)',
-    'approval-au':'Action Count', 'approval-ca':'Action Count',
-    'approval-us':'Action Count', 'approval-email':'Action Count',
+    'hourly':'Hours Worked', 'adhoc':'Project Amount ($)', 'approval':'Action Count',
   };
   const ACTION_COUNT_PLACEHOLDERS = {
-    'hourly':'e.g. 2.35', 'adhoc':'e.g. 23.30',
-    'approval-au':'e.g. 150', 'approval-ca':'e.g. 150',
-    'approval-us':'e.g. 150', 'approval-email':'e.g. 150',
+    'hourly':'e.g. 2.35', 'adhoc':'e.g. 23.30', 'approval':'e.g. 150',
   };
 
   function updateCalcPreview() {
@@ -1384,6 +1411,226 @@
     gt.className = 'pr-grand-total';
     gt.innerHTML = `<span>Total Pay Run (${sorted.length} freelancer${sorted.length===1?'':'s'}, ${allEntries.length} entries)</span><span>${fmt(grandTotal)}</span>`;
     resultsEl.appendChild(gt);
+  }
+
+  /* ══════════════════════════════════════════
+     REPORTS — CSV RECONCILIATION
+  ══════════════════════════════════════════ */
+  let _csvData = null; // parsed transactions, stored after upload
+
+  document.getElementById('csv-file').addEventListener('change', function() {
+    const f = this.files[0];
+    if (!f) return;
+    document.getElementById('csv-file-label').textContent = '✓ ' + f.name;
+    document.getElementById('csv-upload-area').classList.add('has-file');
+    const reader = new FileReader();
+    reader.onload = e => { _csvData = parseUpworkCSV(e.target.result); };
+    reader.readAsText(f);
+  });
+
+  function csvParseLine(line) {
+    const cols = []; let inQ = false, cur = '';
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (ch === '"') { inQ = !inQ; }
+      else if (ch === ',' && !inQ) { cols.push(cur.trim()); cur = ''; }
+      else { cur += ch; }
+    }
+    cols.push(cur.trim());
+    return cols;
+  }
+
+  function upworkDateToISO(s) {
+    try { return new Date(s).toISOString().slice(0,10); } catch { return ''; }
+  }
+
+  function parseUpworkCSV(text) {
+    const lines = text.split('\n').filter(l => l.trim());
+    const groups = {};
+    for (let i = 1; i < lines.length; i++) {
+      const c = csvParseLine(lines[i]);
+      const txId    = c[1];
+      const txType  = c[2];
+      const fl      = c[10];
+      const dateISO = upworkDateToISO(c[0]);
+      const jobTitle= c[3];
+      const amount  = Math.abs(parseFloat(c[15]) || 0);
+      if (!txId || !fl || txType === 'Payment') continue;
+      if (!groups[txId]) groups[txId] = { id:txId, freelancer:fl, date:dateISO, jobTitle, rows:[] };
+      groups[txId].rows.push({ type: txType, amount });
+    }
+    return Object.values(groups).map(g => {
+      const bonusRow = g.rows.find(r => r.type === 'Bonus');
+      const hourlyRow= g.rows.find(r => r.type === 'Hourly');
+      const feeRow   = g.rows.find(r => r.type === 'Marketplace Fee');
+      const gstRow   = g.rows.find(r => r.type === 'GST');
+      const source   = bonusRow ? 'tracker' : 'upwork';
+      const base     = (bonusRow || hourlyRow)?.amount || 0;
+      const fee      = feeRow?.amount || 0;
+      const gst      = gstRow?.amount || 0;
+      return { id:g.id, freelancer:g.freelancer, date:g.date, jobTitle:g.jobTitle, source, base, fee, gst, total: base+fee+gst };
+    });
+  }
+
+  async function runReport() {
+    const emptyEl   = document.getElementById('rpt-empty');
+    const resultsEl = document.getElementById('rpt-results');
+    if (!_csvData) { alert('Please upload a CSV file first.'); return; }
+    const from = document.getElementById('rpt-from').value;
+    const to   = document.getElementById('rpt-to').value;
+
+    // Filter by date range if set
+    let txns = _csvData;
+    if (from) txns = txns.filter(t => t.date >= from);
+    if (to)   txns = txns.filter(t => t.date <= to);
+    if (!txns.length) {
+      emptyEl.textContent = 'No transactions found in the selected date range.';
+      emptyEl.style.display = ''; resultsEl.style.display = 'none'; return;
+    }
+
+    // Match freelancers to teams from Firestore
+    const fls = await loadFreelancers();
+    const nameToTeam = {};
+    fls.forEach(f => { nameToTeam[f.name.toLowerCase()] = f.team || 'Other'; });
+
+    function getTeam(name) {
+      return nameToTeam[name.toLowerCase()] || 'Unassigned';
+    }
+
+    // Group by team → freelancer
+    const teamMap = {};
+    txns.forEach(t => {
+      const team = getTeam(t.freelancer);
+      if (!teamMap[team]) teamMap[team] = {};
+      if (!teamMap[team][t.freelancer]) teamMap[team][t.freelancer] = { txns:[], base:0, fee:0, gst:0, total:0, tracker:0, upwork:0 };
+      const fl = teamMap[team][t.freelancer];
+      fl.txns.push(t);
+      fl.base   += t.base;  fl.fee  += t.fee;
+      fl.gst    += t.gst;   fl.total+= t.total;
+      if (t.source === 'tracker') fl.tracker += t.base;
+      else                        fl.upwork   += t.base;
+    });
+
+    // Grand totals
+    let gBase=0, gFee=0, gGst=0, gTotal=0, gTracker=0, gUpwork=0;
+    txns.forEach(t => { gBase+=t.base; gFee+=t.fee; gGst+=t.gst; gTotal+=t.total;
+      if (t.source==='tracker') gTracker+=t.base; else gUpwork+=t.base; });
+
+    // Summary cards
+    const summaryEl = document.getElementById('rpt-summary');
+    const cards = [
+      { label:'Total Cost',       val: fmt(gTotal),   color:'#1d1d1f' },
+      { label:'Tracker Entries',  val: fmt(gTracker), color:'#1a7f3c', note:'paid as bonuses' },
+      { label:'Upwork Only',      val: fmt(gUpwork),  color:'#1e40af', note:'hourly invoices' },
+      { label:'Marketplace Fees', val: fmt(gFee),     color:'#92400e' },
+      { label:'GST',              val: fmt(gGst),     color:'#6e6e73' },
+    ];
+    summaryEl.innerHTML = cards.map(c => `
+      <div style="background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+        <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73;margin-bottom:4px">${c.label}</div>
+        <div style="font-size:1.35rem;font-weight:800;color:${c.color}">${c.val}</div>
+        ${c.note?`<div style="font-size:0.72rem;color:#aaa;margin-top:2px">${c.note}</div>`:''}
+      </div>`).join('');
+
+    // Team accordion
+    const teamsEl = document.getElementById('rpt-teams');
+    teamsEl.innerHTML = '';
+    const sortedTeams = Object.entries(teamMap).sort((a,b) => {
+      const ta = Object.values(a[1]).reduce((s,f)=>s+f.total,0);
+      const tb = Object.values(b[1]).reduce((s,f)=>s+f.total,0);
+      return tb - ta;
+    });
+
+    sortedTeams.forEach(([team, flMap], ti) => {
+      const teamTotal   = Object.values(flMap).reduce((s,f)=>s+f.total,0);
+      const teamTracker = Object.values(flMap).reduce((s,f)=>s+f.tracker,0);
+      const teamUpwork  = Object.values(flMap).reduce((s,f)=>s+f.upwork,0);
+      const flCount     = Object.keys(flMap).length;
+
+      const wrap = document.createElement('div');
+      wrap.style.marginBottom = '12px';
+
+      const header = document.createElement('div');
+      header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:14px 20px;background:#fff;border-radius:12px;box-shadow:0 1px 4px rgba(0,0,0,0.08);cursor:pointer;user-select:none';
+      header.innerHTML = `
+        <div style="display:flex;align-items:center;gap:12px">
+          <span class="team-badge ${teamCls(team)}">${esc(team)}</span>
+          <span style="font-size:0.82rem;color:#6e6e73">${flCount} freelancer${flCount===1?'':'s'}</span>
+          <span style="font-size:0.78rem;color:#1a7f3c">Tracker ${fmt(teamTracker)}</span>
+          <span style="font-size:0.78rem;color:#1e40af">Upwork ${fmt(teamUpwork)}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <span style="font-size:1.05rem;font-weight:700">${fmt(teamTotal)}</span>
+          <span class="pr-fl-chevron" id="rpt-chev-${ti}">▼</span>
+        </div>`;
+
+      const detail = document.createElement('div');
+      detail.style.display = 'none';
+      detail.style.marginTop = '4px';
+
+      // Freelancer rows
+      Object.entries(flMap).sort((a,b)=>b[1].total-a[1].total).forEach(([name, fl], fi) => {
+        const flWrap = document.createElement('div');
+        flWrap.style.cssText = 'background:#fff;border-radius:10px;margin-bottom:6px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.06)';
+
+        const flHeader = document.createElement('div');
+        flHeader.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:11px 16px;cursor:pointer;user-select:none;border-bottom:1px solid #f0f0f5';
+        flHeader.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <span style="font-weight:600;font-size:0.9rem">${esc(name)}</span>
+            ${fl.tracker>0?`<span style="font-size:0.75rem;background:#d1fae5;color:#065f46;padding:2px 7px;border-radius:10px;font-weight:600">Tracker ${fmt(fl.tracker)}</span>`:''}
+            ${fl.upwork>0 ?`<span style="font-size:0.75rem;background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:10px;font-weight:600">Upwork ${fmt(fl.upwork)}</span>` :''}
+            <span style="font-size:0.75rem;color:#aaa">Fees ${fmt(fl.fee)} · GST ${fmt(fl.gst)}</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-weight:700;white-space:nowrap">${fmt(fl.total)}</span>
+            <span style="font-size:0.75rem;color:#aaa" id="rpt-flchev-${ti}-${fi}">▼</span>
+          </div>`;
+
+        const flDetail = document.createElement('div');
+        flDetail.style.display = 'none';
+        flDetail.innerHTML = `
+          <table style="font-size:0.83rem">
+            <thead><tr>
+              <th>Date</th><th>Job Title</th><th>Source</th>
+              <th class="r">Base</th><th class="r">Fee</th><th class="r">GST</th><th class="r">Total</th>
+            </tr></thead>
+            <tbody>${fl.txns.sort((a,b)=>a.date.localeCompare(b.date)).map(t=>`
+              <tr>
+                <td style="white-space:nowrap;color:#6e6e73">${t.date}</td>
+                <td style="max-width:220px;font-size:0.8rem;color:#555">${esc(t.jobTitle)}</td>
+                <td>${t.source==='tracker'
+                  ?'<span style="background:#d1fae5;color:#065f46;padding:2px 7px;border-radius:10px;font-size:0.72rem;font-weight:600">Tracker</span>'
+                  :'<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:10px;font-size:0.72rem;font-weight:600">Upwork</span>'}</td>
+                <td style="text-align:right;white-space:nowrap">${fmt(t.base)}</td>
+                <td style="text-align:right;white-space:nowrap;color:#92400e">${fmt(t.fee)}</td>
+                <td style="text-align:right;white-space:nowrap;color:#6e6e73">${fmt(t.gst)}</td>
+                <td style="text-align:right;font-weight:700;white-space:nowrap">${fmt(t.total)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>`;
+
+        flHeader.addEventListener('click', () => {
+          const open = flDetail.style.display === 'block';
+          flDetail.style.display = open ? 'none' : 'block';
+          document.getElementById(`rpt-flchev-${ti}-${fi}`).textContent = open ? '▼' : '▲';
+        });
+        flWrap.appendChild(flHeader); flWrap.appendChild(flDetail);
+        detail.appendChild(flWrap);
+      });
+
+      header.addEventListener('click', () => {
+        const open = detail.style.display === 'block';
+        detail.style.display = open ? 'none' : 'block';
+        document.getElementById(`rpt-chev-${ti}`).classList.toggle('open', !open);
+      });
+
+      wrap.appendChild(header); wrap.appendChild(detail);
+      teamsEl.appendChild(wrap);
+    });
+
+    emptyEl.style.display = 'none';
+    resultsEl.style.display = 'block';
   }
 
   /* ══════════════════════════════════════════
