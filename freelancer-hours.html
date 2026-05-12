@@ -598,7 +598,12 @@
     <div style="max-width:1200px;margin:0 auto;padding-top:8px">
       <div class="fl-tab-header">
         <h2>All Entries</h2>
+        <label style="display:inline-flex;align-items:center;gap:6px;padding:8px 16px;background:#0071e3;color:#fff;border-radius:10px;font-size:0.85rem;font-weight:600;cursor:pointer;user-select:none">
+          📥 Import Tracker CSV
+          <input type="file" id="import-tracker-csv" accept=".csv" style="display:none" />
+        </label>
       </div>
+      <div id="import-progress" style="display:none;margin-bottom:12px;padding:10px 16px;background:#f0faf4;border:1.5px solid #a3e4b5;border-radius:10px;font-size:0.88rem;color:#1a7f3c;font-weight:600"></div>
       <div class="card">
         <div id="entries-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">Loading…</div>
         <div style="overflow-x:auto" id="entries-table-wrap" style="display:none">
@@ -1595,6 +1600,17 @@
       return nameToTeam[name.toLowerCase()] || 'Unassigned';
     }
 
+    // Load tracker entries from Firestore for reconciliation
+    const allTrackerEntries = await loadEntries();
+    const trackerByName = {};
+    allTrackerEntries.forEach(e => {
+      const name = (e.nameSnapshot || '').toLowerCase().trim();
+      const eDate = e.date || '';
+      if (name && (!from || eDate >= from) && (!to || eDate <= to)) {
+        (trackerByName[name] = trackerByName[name] || []).push(e);
+      }
+    });
+
     // Group by team → freelancer
     const teamMap = {};
     txns.forEach(t => {
@@ -1685,9 +1701,18 @@
             <span style="font-size:0.75rem;color:#aaa" id="rpt-flchev-${ti}-${fi}">▼</span>
           </div>`;
 
+        const flEntries = trackerByName[name.toLowerCase().trim()] || [];
+        const trackerCalc = flEntries.reduce((s,e) => s+(e.amount||0), 0);
+        const upworkPaid  = fl.tracker;
+        const diff        = upworkPaid - trackerCalc;
+        const diffColor   = Math.abs(diff) < 0.01 ? '#1a7f3c' : diff > 0 ? '#92400e' : '#b91c1c';
+        const diffLabel   = Math.abs(diff) < 0.01 ? '✓ Match' : diff > 0 ? `+${fmt(diff)} over` : `${fmt(diff)} under`;
+
         const flDetail = document.createElement('div');
         flDetail.style.display = 'none';
-        flDetail.innerHTML = `
+
+        // Upwork transactions table
+        const upworkTable = `
           <table style="font-size:0.83rem">
             <thead><tr>
               <th>Date</th><th>Job Title</th><th>Source</th>
@@ -1707,6 +1732,45 @@
               </tr>`).join('')}
             </tbody>
           </table>`;
+
+        // Tracker reconciliation section (only if tracker transactions exist)
+        let trackerSection = '';
+        if (fl.tracker > 0) {
+          const entriesRows = flEntries.length
+            ? flEntries.sort((a,b)=>a.date.localeCompare(b.date)).map(e => {
+                const cl = e.taskType==='hourly'?`${fmtH(e.actionCount)} hrs`:e.taskType==='adhoc'?`$${fmtH(e.actionCount)}`:fmtH(e.actionCount);
+                return `<tr>
+                  <td style="white-space:nowrap;color:#6e6e73">${esc(e.date)}</td>
+                  <td><span class="type-badge ${typeBadgeClass(e.taskType)}">${esc(taskTypeLabel(e.taskType))}</span></td>
+                  <td style="color:#555;white-space:nowrap">${cl}</td>
+                  <td>${e.adhocSubTask?`<span class="pill">${esc(e.adhocSubTask)}</span>`:'<span style="color:#aaa">—</span>'}</td>
+                  <td style="font-size:0.8rem;color:#555">${esc(e.country||'')}</td>
+                  <td style="text-align:right;font-weight:600;color:#1a7f3c;white-space:nowrap">${fmt(e.amount||0)}</td>
+                </tr>`;
+              }).join('')
+            : `<tr><td colspan="6" style="text-align:center;color:#aaa;padding:12px">No matching tracker entries found for this date range.</td></tr>`;
+
+          trackerSection = `
+            <div style="margin:0 16px 14px;border:1.5px solid #a3e4b5;border-radius:10px;overflow:hidden">
+              <div style="background:#f0faf4;padding:10px 14px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+                <span style="font-size:0.8rem;font-weight:700;color:#1a7f3c;text-transform:uppercase;letter-spacing:0.04em">Tracker Reconciliation</span>
+                <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+                  <span style="font-size:0.8rem;color:#555">Upwork paid <strong>${fmt(upworkPaid)}</strong></span>
+                  <span style="font-size:0.8rem;color:#555">Tracker calc <strong>${fmt(trackerCalc)}</strong></span>
+                  <span style="font-size:0.8rem;font-weight:700;color:${diffColor}">${diffLabel}</span>
+                </div>
+              </div>
+              ${flEntries.length ? `
+              <table style="font-size:0.8rem">
+                <thead><tr>
+                  <th>Date</th><th>Task Type</th><th>Count / Hrs</th><th>Project Type</th><th>Country</th><th class="r">Calc Earnings</th>
+                </tr></thead>
+                <tbody>${entriesRows}</tbody>
+              </table>` : `<div style="padding:12px 14px;color:#aaa;font-size:0.82rem">No matching tracker entries found for this date range.</div>`}
+            </div>`;
+        }
+
+        flDetail.innerHTML = upworkTable + trackerSection;
 
         flHeader.addEventListener('click', () => {
           const open = flDetail.style.display === 'block';
@@ -1730,6 +1794,108 @@
     emptyEl.style.display = 'none';
     resultsEl.style.display = 'block';
   }
+
+  /* ══════════════════════════════════════════
+     TRACKER CSV IMPORT
+  ══════════════════════════════════════════ */
+  function parseFullCSV(text) {
+    const rows = [];
+    let row = [], cur = '', inQ = false;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (text[i+1] === '"') { cur += '"'; i++; }
+          else inQ = false;
+        } else { cur += ch; }
+      } else {
+        if (ch === '"') { inQ = true; }
+        else if (ch === ',') { row.push(cur.trim()); cur = ''; }
+        else if (ch === '\n' || ch === '\r') {
+          if (ch === '\r' && text[i+1] === '\n') i++;
+          row.push(cur.trim()); cur = '';
+          if (row.some(f => f !== '')) rows.push(row);
+          row = [];
+        } else { cur += ch; }
+      }
+    }
+    if (cur.trim() !== '' || row.length) { row.push(cur.trim()); if (row.some(f => f !== '')) rows.push(row); }
+    return rows;
+  }
+
+  function parseTrackerCSV(text) {
+    const allRows = parseFullCSV(text);
+    if (allRows.length < 2) return [];
+    const entries = [];
+    allRows.slice(1).forEach(c => {
+      if (c.length < 5) return;
+      const freelancer  = (c[1] || '').trim();
+      const dateRaw     = (c[2] || '').trim();
+      const actionCount = parseFloat(c[3]) || 0;
+      const taskTypeRaw = (c[4] || '').trim();
+      const projectType = (c[5] || '').trim();
+      const countryRaw  = (c[6] || '').trim();
+      const description = (c[8] || '').trim();
+      const fileName    = (c[13] || '').trim();
+      const createdRaw  = (c[17] || '').trim();
+      if (!freelancer || !dateRaw || !taskTypeRaw) return;
+      let date = '';
+      try { const d = new Date(dateRaw); if (!isNaN(d)) date = d.toISOString().slice(0,10); } catch {}
+      if (!date) return;
+      let taskType = '', country = countryRaw;
+      if      (taskTypeRaw === 'AU Approval 2c')   { taskType = 'approval'; country = 'AU'; }
+      else if (taskTypeRaw === 'CA Approval 2c')   { taskType = 'approval'; country = 'CA'; }
+      else if (taskTypeRaw === 'US Approval 2c')   { taskType = 'approval'; country = 'US'; }
+      else if (taskTypeRaw === 'Email Receipts 3c') { taskType = 'email-receipts-3c'; }
+      else if (taskTypeRaw === 'Hourly Tasks')      { taskType = 'hourly'; }
+      else if (taskTypeRaw === 'Adhoc Projects')    { taskType = 'adhoc'; }
+      else return;
+      const amount = calcAmount(taskType, actionCount);
+      const mgmtKey = (taskType === 'approval' || taskType === 'email-receipts-3c') ? taskType : projectType;
+      const managementAccount = MGMT_ACCOUNT_MAP[mgmtKey] || '';
+      const teamEntry = Object.entries(TEAM_MAP).find(([k]) => k.toLowerCase() === freelancer.toLowerCase());
+      const team = teamEntry ? teamEntry[1] : '';
+      let createdAt = new Date().toISOString();
+      try { const d = new Date(createdRaw); if (!isNaN(d)) createdAt = d.toISOString(); } catch {}
+      entries.push({
+        nameSnapshot: freelancer, teamSnapshot: team,
+        date, taskType, actionCount, adhocSubTask: projectType,
+        country, description, fileName, amount, managementAccount,
+        createdAt, importedAt: new Date().toISOString(), source: 'import',
+      });
+    });
+    return entries;
+  }
+
+  document.getElementById('import-tracker-csv').addEventListener('change', async function() {
+    const f = this.files[0];
+    if (!f) return;
+    const progressEl = document.getElementById('import-progress');
+    progressEl.textContent = 'Parsing CSV…';
+    progressEl.style.display = '';
+    const text = await f.text();
+    const entries = parseTrackerCSV(text);
+    if (!entries.length) {
+      progressEl.style.background = '#fff1f2'; progressEl.style.borderColor = '#fca5a5'; progressEl.style.color = '#b91c1c';
+      progressEl.textContent = '⚠️ No valid entries found in this file.';
+      this.value = ''; return;
+    }
+    const confirmed = confirm(`Import ${entries.length} tracker entries from "${f.name}"?\n\nThis will add them permanently to Firestore. Duplicates will not be checked.`);
+    if (!confirmed) { progressEl.style.display = 'none'; this.value = ''; return; }
+    progressEl.textContent = `Importing 0 / ${entries.length}…`;
+    const BATCH = 400;
+    let done = 0;
+    for (let i = 0; i < entries.length; i += BATCH) {
+      const batch = db.batch();
+      entries.slice(i, i + BATCH).forEach(e => batch.set(db.collection('entries').doc(), e));
+      await batch.commit();
+      done += Math.min(BATCH, entries.length - i);
+      progressEl.textContent = `Importing ${done} / ${entries.length}…`;
+    }
+    progressEl.textContent = `✓ Imported ${done} entries successfully.`;
+    this.value = '';
+    await render();
+  });
 
   /* ══════════════════════════════════════════
      INIT
