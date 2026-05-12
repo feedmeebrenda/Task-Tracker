@@ -1,0 +1,1424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Freelancer Hours Tracker</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f5f5f7;
+      color: #1d1d1f;
+      min-height: 100vh;
+      padding: 32px 16px;
+    }
+
+    .page-header {
+      max-width: 1100px;
+      margin: 0 auto 28px;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+    h1 { font-size: 1.6rem; font-weight: 700; }
+    .subtitle { color: #6e6e73; font-size: 0.88rem; margin-top: 2px; }
+
+    .tabs { display: flex; gap: 6px; }
+    .tab-btn {
+      padding: 8px 18px;
+      border: 1.5px solid #e0e0e5;
+      border-radius: 20px;
+      background: #fff;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #6e6e73;
+      transition: all 0.15s;
+    }
+    .tab-btn.active { background: #0071e3; border-color: #0071e3; color: #fff; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 28px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04);
+    }
+    .card h2 { font-size: 1rem; font-weight: 600; margin-bottom: 20px; }
+
+    .layout {
+      max-width: 560px;
+      margin: 0 auto;
+    }
+    .full-width { max-width: 1100px; margin: 24px auto 0; }
+
+    .calc-summary {
+      background: #f0faf4;
+      border: 1.5px solid #a3e4b5;
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 18px;
+    }
+    .calc-summary-title { font-weight: 700; font-size: 0.88rem; color: #1a7f3c; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .calc-summary-row { display: flex; justify-content: space-between; font-size: 0.9rem; padding: 3px 0; color: #333; }
+    .calc-summary-total { display: flex; justify-content: space-between; font-size: 1.05rem; font-weight: 700; color: #1a7f3c; border-top: 1.5px solid #a3e4b5; margin-top: 8px; padding-top: 8px; }
+
+    label {
+      display: block;
+      font-size: 0.78rem;
+      font-weight: 600;
+      color: #6e6e73;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    input[type=text], input[type=email], input[type=number],
+    input[type=date], input[type=password], select, textarea {
+      width: 100%;
+      padding: 10px 14px;
+      border: 1.5px solid #e0e0e5;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      background: #fafafa;
+      transition: border-color 0.15s;
+      margin-bottom: 16px;
+      outline: none;
+      color: #1d1d1f;
+    }
+    input:focus, select:focus, textarea:focus { border-color: #0071e3; background: #fff; }
+    textarea { resize: vertical; min-height: 80px; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .btn {
+      width: 100%;
+      padding: 12px;
+      background: #0071e3;
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+      margin-top: 4px;
+    }
+    .btn:hover { background: #0058b0; }
+    .btn:disabled { background: #c0d8f5; cursor: not-allowed; }
+    .btn-outline {
+      background: transparent;
+      border: 1.5px solid #0071e3;
+      color: #0071e3;
+      padding: 9px 20px;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn-outline:hover { background: #0071e3; color: #fff; }
+    .btn-ghost {
+      background: transparent;
+      border: 1.5px solid #e0e0e5;
+      color: #6e6e73;
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+    .btn-ghost:hover { border-color: #aaa; color: #1d1d1f; }
+    .btn-sm {
+      background: #f0f0f5;
+      border: 1.5px solid #e0e0e5;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 0.83rem;
+      font-weight: 600;
+      cursor: pointer;
+      color: #1d1d1f;
+      white-space: nowrap;
+      transition: background 0.15s;
+      flex-shrink: 0;
+    }
+    .btn-sm:hover { background: #e0e0e8; }
+
+    .toast {
+      display: none;
+      margin-top: 12px;
+      padding: 10px 14px;
+      background: #d1fae5;
+      color: #065f46;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+    .field-hint { font-size: 0.78rem; color: #f59e0b; margin-top: -12px; margin-bottom: 14px; }
+    .label-note { font-size: 0.75rem; color: #aaa; font-weight: 400; text-transform: none; letter-spacing: 0; }
+
+    /* ── Tables ── */
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+    thead th {
+      text-align: left;
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: #6e6e73;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      padding: 0 8px 10px;
+      border-bottom: 1.5px solid #f0f0f5;
+      white-space: nowrap;
+    }
+    thead th.r { text-align: right; }
+    tbody tr { border-bottom: 1px solid #f0f0f5; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody td { padding: 10px 8px; vertical-align: top; }
+    .freelancer-name { font-weight: 600; }
+    .hours-col { color: #6e6e73; }
+    .total-col { text-align: right; font-weight: 700; white-space: nowrap; }
+    tfoot td { padding-top: 14px; font-size: 0.85rem; }
+    tfoot .label { color: #6e6e73; font-weight: 600; }
+    tfoot .grand-total { text-align: right; font-weight: 800; font-size: 1rem; color: #0071e3; }
+    .summary-empty { text-align: center; color: #aaa; font-size: 0.9rem; padding: 32px 0; }
+
+    /* ── Team badges ── */
+    .team-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .team-Redemption   { background: #fef3c7; color: #92400e; }
+    .team-Approval     { background: #dbeafe; color: #1e40af; }
+    .team-Support      { background: #d1fae5; color: #065f46; }
+    .team-DataChecking { background: #ede9fe; color: #5b21b6; }
+    .team-Other        { background: #f0f0f5; color: #555; }
+
+    /* ── Task type badge ── */
+    .type-badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .type-hourly         { background: #fef3c7; color: #92400e; }
+    .type-adhoc          { background: #ede9fe; color: #5b21b6; }
+    .type-approval       { background: #dbeafe; color: #1e40af; }
+
+    .task-pills { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+    .pill { background: #f0f0f5; border-radius: 6px; padding: 2px 8px; font-size: 0.75rem; color: #555; }
+
+    .del-btn {
+      background: none; border: none; cursor: pointer;
+      color: #c0c0c8; font-size: 1.1rem; padding: 0 4px;
+      line-height: 1; transition: color 0.15s;
+    }
+    .del-btn:hover { color: #d00; }
+    .file-dl-btn {
+      background: none; border: none; cursor: pointer;
+      color: #0071e3; font-size: 0.8rem; padding: 0;
+      font-family: inherit; text-decoration: underline;
+      transition: color 0.15s;
+    }
+    .file-dl-btn:hover { color: #0058b0; }
+
+    /* ── Freelancers tab ── */
+    .fl-tab-header {
+      max-width: 1100px;
+      margin: 0 auto 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .fl-tab-header h2 { font-size: 1.1rem; font-weight: 700; }
+    .fl-tab-actions { display: flex; gap: 8px; align-items: center; }
+    .fl-table-wrap { max-width: 1100px; margin: 0 auto; }
+    .no-freelancers { text-align: center; color: #aaa; font-size: 0.9rem; padding: 40px 0; }
+    .group-row td {
+      padding: 14px 8px 4px;
+      font-size: 0.72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: #aaa; border-bottom: none !important;
+    }
+    .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+    .dot-ok  { background: #10b981; }
+    .dot-mis { background: #f59e0b; }
+
+    /* ── Modals ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 200;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 40px 16px 60px;
+      overflow-y: auto;
+    }
+    .modal-box {
+      background: #fff;
+      border-radius: 20px;
+      width: 100%;
+      max-width: 600px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.22);
+      flex-shrink: 0;
+    }
+    .modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 28px 20px;
+      border-bottom: 1px solid #f0f0f5;
+    }
+    .modal-header h2 { font-size: 1.1rem; font-weight: 700; }
+    .modal-close {
+      background: #f0f0f5; border: none; border-radius: 50%;
+      width: 32px; height: 32px; font-size: 1.2rem;
+      cursor: pointer; color: #555; line-height: 1;
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.15s;
+    }
+    .modal-close:hover { background: #e0e0e8; }
+    .modal-body { padding: 24px 28px 28px; }
+    .modal-footer {
+      padding: 20px 28px;
+      border-top: 1px solid #f0f0f5;
+      display: flex;
+      gap: 10px;
+      justify-content: flex-end;
+    }
+    .modal-footer .btn { width: auto; padding: 11px 28px; margin-top: 0; }
+    .btn-cancel {
+      background: #f0f0f5; color: #1d1d1f;
+      border: none; border-radius: 10px;
+      padding: 11px 20px; font-size: 0.95rem; font-weight: 600;
+      cursor: pointer; transition: background 0.15s;
+    }
+    .btn-cancel:hover { background: #e0e0e8; }
+
+    .form-section { padding-bottom: 24px; margin-bottom: 24px; border-bottom: 1px solid #f0f0f5; }
+    .form-section:last-of-type { border-bottom: none; padding-bottom: 0; margin-bottom: 0; }
+    .section-label {
+      font-size: 0.72rem; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 0.06em;
+      color: #0071e3; margin-bottom: 16px;
+    }
+
+    .callout {
+      border-radius: 10px; padding: 11px 14px;
+      font-size: 0.83rem; line-height: 1.5;
+      margin-bottom: 14px; display: flex; gap: 10px;
+    }
+    .callout-amber { background: #fffbeb; border: 1.5px solid #fde68a; color: #92400e; }
+    .callout-blue  { background: #eff6ff; border: 1.5px solid #bfdbfe; color: #1e3a5f; }
+    .callout-green { background: #f0fdf4; border: 1.5px solid #86efac; color: #14532d; }
+    .callout-red   { background: #fef2f2; border: 1.5px solid #fecaca; color: #b91c1c; }
+    .callout-icon  { flex-shrink: 0; }
+
+    .check-item {
+      display: flex; gap: 12px; align-items: flex-start;
+      padding: 12px 14px; background: #fafafa;
+      border: 1.5px solid #e0e0e5; border-radius: 10px;
+      margin-bottom: 10px; transition: border-color 0.15s;
+    }
+    .check-item:has(input:checked) { border-color: #10b981; background: #f0fdf4; }
+    .check-item input[type=checkbox] {
+      width: 18px; height: 18px; margin: 0;
+      flex-shrink: 0; margin-top: 1px;
+      cursor: pointer; accent-color: #0071e3;
+    }
+    .check-item label {
+      font-size: 0.88rem; color: #1d1d1f;
+      font-weight: 400; text-transform: none;
+      letter-spacing: 0; cursor: pointer; line-height: 1.5;
+    }
+    .check-item label strong { font-weight: 700; }
+    .check-item label a { color: #0071e3; }
+
+    .radio-group { display: flex; gap: 12px; margin-bottom: 16px; }
+    .radio-option {
+      flex: 1; display: flex; align-items: center; gap: 8px;
+      padding: 11px 16px; border: 1.5px solid #e0e0e5;
+      border-radius: 10px; cursor: pointer; font-size: 0.95rem;
+      transition: all 0.15s; background: #fafafa;
+    }
+    .radio-option:has(input:checked) { border-color: #0071e3; background: #eff6ff; color: #0071e3; font-weight: 600; }
+    .radio-option input[type=radio] { accent-color: #0071e3; }
+
+    .file-upload {
+      border: 2px dashed #e0e0e5; border-radius: 10px;
+      padding: 20px 16px; text-align: center; cursor: pointer;
+      transition: all 0.15s; margin-bottom: 16px; position: relative;
+    }
+    .file-upload:hover { border-color: #0071e3; background: #f0f7ff; }
+    .file-upload.has-file { border-color: #10b981; background: #f0fdf4; border-style: solid; }
+    .file-upload input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
+    .file-upload-icon { font-size: 1.6rem; margin-bottom: 6px; }
+    .file-upload-label { font-size: 0.88rem; color: #6e6e73; }
+    .file-upload-name { font-size: 0.88rem; color: #10b981; font-weight: 600; margin-top: 4px; }
+
+    .error-msg {
+      background: #fef2f2; border: 1.5px solid #fecaca;
+      border-radius: 8px; padding: 10px 14px;
+      font-size: 0.85rem; color: #b91c1c;
+      margin-bottom: 16px; display: none;
+    }
+
+    /* ── Conditional form sections ── */
+    .cond-section { display: none; }
+
+    /* ── Hours calculation guide ── */
+    .calc-guide {
+      background: #eff6ff;
+      border: 1.5px solid #bfdbfe;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.83rem;
+      color: #1e3a5f;
+      margin-top: -8px;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    .calc-guide ol { padding-left: 18px; margin-top: 6px; }
+    .calc-guide li { margin-bottom: 3px; }
+
+    /* ── Pay Run ── */
+    .pr-freelancer { margin-bottom: 16px; }
+    .pr-fl-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+      cursor: pointer;
+      user-select: none;
+    }
+    .pr-fl-header:hover { background: #f8f8fa; }
+    .pr-fl-left { display: flex; align-items: center; gap: 12px; }
+    .pr-fl-total { font-size: 1.1rem; font-weight: 700; color: #1a7f3c; }
+    .pr-fl-chevron { font-size: 0.8rem; color: #aaa; transition: transform 0.2s; }
+    .pr-fl-chevron.open { transform: rotate(180deg); }
+    .pr-fl-detail {
+      display: none;
+      margin-top: 4px;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+    .pr-fl-detail table { width: 100%; }
+    .pr-grand-total {
+      background: #f0faf4;
+      border: 1.5px solid #a3e4b5;
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 8px;
+      font-weight: 700;
+      font-size: 1rem;
+    }
+    .pr-grand-total span:last-child { font-size: 1.2rem; color: #1a7f3c; }
+
+    /* ── Adhoc subtask select row ── */
+    .combo-row {
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      margin-bottom: 0;
+    }
+    .combo-row select { flex: 1; margin-bottom: 10px; }
+    .adhoc-new-row {
+      display: none;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+    .adhoc-new-row input { margin-bottom: 0; flex: 1; }
+    #manage-project-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 4px;
+      max-height: 220px;
+      overflow-y: auto;
+    }
+    .manage-pt-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #f5f5f7;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .manage-pt-del {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: #c00;
+      font-size: 1rem;
+      line-height: 1;
+      padding: 0 2px;
+    }
+    .manage-pt-del:hover { color: #900; }
+
+    /* ── Rate hint ── */
+    .rate-hint {
+      display: none;
+      font-size: 0.78rem;
+      color: #0071e3;
+      font-weight: 600;
+      margin-top: -12px;
+      margin-bottom: 14px;
+    }
+
+    /* ── Admin gate ── */
+    .gate-icon { text-align: center; font-size: 2.5rem; margin-bottom: 12px; }
+    .gate-title { text-align: center; font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+    .gate-subtitle { text-align: center; color: #6e6e73; font-size: 0.88rem; margin-bottom: 24px; }
+
+    /* ── Public registration ── */
+    #public-header { max-width: 600px; margin: 0 auto 28px; text-align: center; }
+    #public-header h1 { font-size: 1.8rem; margin-bottom: 8px; }
+    #public-header p  { color: #6e6e73; font-size: 0.95rem; }
+    .success-screen { text-align: center; padding: 40px 28px 48px; }
+    .success-icon  { font-size: 3rem; margin-bottom: 16px; }
+    .success-title { font-size: 1.3rem; font-weight: 700; margin-bottom: 10px; }
+    .success-body  { color: #6e6e73; font-size: 0.95rem; line-height: 1.6; }
+    body.public-mode { background: #f5f5f7; }
+    body.public-mode #fl-modal { position: static; background: transparent; padding: 0; display: block !important; }
+    body.public-mode #fl-modal .modal-box { margin: 0 auto; box-shadow: 0 1px 4px rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.04); }
+  </style>
+</head>
+<body>
+
+<div id="app">
+
+  <div class="page-header">
+    <div>
+      <h1>Freelancer Hours Tracker</h1>
+      <p class="subtitle">Log tasks · Review totals by freelancer</p>
+    </div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="log">Log Entry</button>
+      <button class="tab-btn" data-tab="entries">All Entries</button>
+      <button class="tab-btn" data-tab="freelancers">Freelancers</button>
+      <button class="tab-btn" data-tab="payrun">Pay Run</button>
+      <button class="tab-btn" data-tab="add-freelancer">+ Add Freelancer</button>
+    </div>
+  </div>
+
+  <!-- ═══ TAB: LOG ENTRY ═══ -->
+  <div class="tab-panel active" id="tab-log">
+    <div class="layout">
+
+      <!-- ── Entry Form ── -->
+      <div class="card">
+        <h2>Log Entry</h2>
+        <form id="entry-form" onsubmit="handleEntrySubmit(event)">
+
+          <label for="fl-select">Freelancer</label>
+          <select id="fl-select" required>
+            <option value="">— select a freelancer —</option>
+          </select>
+          <p class="field-hint" id="fl-hint" style="display:none">
+            ⚠️ No freelancers registered yet — go to the <strong>Freelancers</strong> tab first.
+          </p>
+
+          <label for="entry-date">Action Date</label>
+          <input id="entry-date" type="date" required />
+
+          <label for="task-type">Task Type</label>
+          <select id="task-type" required>
+            <option value="">— select task type —</option>
+            <option value="hourly">Hourly Tasks</option>
+            <option value="adhoc">Adhoc Projects</option>
+            <option value="approval-au">Approval (AU)</option>
+            <option value="approval-ca">Approval (CA)</option>
+            <option value="approval-us">Approval (US)</option>
+            <option value="approval-email">Approval (Email)</option>
+          </select>
+          <div class="rate-hint" id="rate-hint"></div>
+
+          <!-- Action Count — shown for all task types -->
+          <div id="section-action-count" style="display:none">
+            <label id="action-count-label" for="action-count">Action Count</label>
+            <input id="action-count" type="number" min="0.01" step="0.01" placeholder="—" />
+            <div id="action-calc-preview" class="rate-hint" style="display:none;color:#1a7f3c;font-weight:600"></div>
+            <div id="hourly-calc-guide" class="calc-guide" style="display:none">
+              <strong>How to calculate hours:</strong>
+              <ol>
+                <li>Track exact hours &amp; minutes (e.g. 2 hours 21 mins)</li>
+                <li>Divide minutes by 60 → 21 ÷ 60 = <strong>0.35</strong></li>
+                <li>Add to whole hours → 2 + 0.35 = <strong>2.35</strong></li>
+              </ol>
+            </div>
+          </div>
+
+          <!-- CONDITIONAL: Project Type (hourly + adhoc) -->
+          <div class="cond-section" id="section-project-type">
+            <label for="adhoc-subtask">Project Type</label>
+            <div class="combo-row">
+              <select id="adhoc-subtask">
+                <option value="">— select project type —</option>
+                <option>Training bonus</option>
+                <option>Support</option>
+                <option>Redemption</option>
+                <option>Data checks</option>
+                <option>Management</option>
+                <option>Annotation tool</option>
+                <option>Email whitelist</option>
+                <option>PII redaction</option>
+                <option>Privacy request</option>
+                <option>Retailer classifier</option>
+                <option>Bonus</option>
+                <option>Product matching</option>
+                <option>Marketing</option>
+                <option>Barcode check</option>
+              </select>
+              <button type="button" class="btn-sm" onclick="toggleAdhocNewRow()">+ New</button>
+              <button type="button" class="btn-sm" onclick="toggleManageProjectTypes()">Manage</button>
+            </div>
+            <div class="adhoc-new-row" id="adhoc-new-row" style="display:none">
+              <input id="adhoc-new-name" type="text" placeholder="New project type name…" />
+              <button type="button" class="btn-sm" onclick="saveNewProjectType()">Save</button>
+            </div>
+            <div id="manage-project-types" style="display:none">
+              <div id="manage-project-list"></div>
+              <button type="button" class="btn-sm" style="margin-top:6px" onclick="toggleManageProjectTypes()">Done</button>
+            </div>
+          </div>
+
+
+          <label for="entry-country">Country</label>
+          <select id="entry-country" required>
+            <option value="">— select country —</option>
+            <option value="unknown">Unknown</option>
+            <option value="US">US</option>
+            <option value="CA">CA</option>
+            <option value="AU">AU</option>
+          </select>
+
+          <div id="section-filename">
+            <label for="entry-filename">File Name <span class="label-note">(optional)</span></label>
+            <input id="entry-filename" type="text" placeholder="e.g. batch_2024_01_15.csv" />
+          </div>
+
+          <div id="section-desc">
+            <label for="entry-desc">Description of Work <span class="label-note">(optional)</span></label>
+            <textarea id="entry-desc" placeholder="Describe what you worked on…"></textarea>
+          </div>
+
+          <!-- Review reminder -->
+          <div class="callout callout-amber" style="margin-bottom:16px">
+            <span class="callout-icon">⚠️</span>
+            <div>
+              <strong>Review before submitting:</strong><br>
+              Double-check your <strong>Action DATE</strong>, <strong>Task TYPE</strong>, and <strong>COUNTRY</strong>.<br>
+              If not sure, please ask!<br>
+              <strong>You will NOT be allowed to edit once submitted.</strong>
+            </div>
+          </div>
+
+          <!-- Calculation summary -->
+          <div class="calc-summary" id="calc-summary" style="display:none">
+            <div class="calc-summary-title">Pay Calculation</div>
+            <div class="calc-summary-row"><span id="cs-type-label">Task Type</span><span id="cs-type-val">—</span></div>
+            <div class="calc-summary-row"><span id="cs-count-label">Count</span><span id="cs-count-val">—</span></div>
+            <div class="calc-summary-row"><span>Rate</span><span id="cs-rate-val">—</span></div>
+            <div class="calc-summary-total"><span>Total Earnings</span><span id="cs-total-val">—</span></div>
+          </div>
+
+          <!-- Honesty pledge -->
+          <div class="check-item" style="margin-bottom:16px">
+            <input type="checkbox" id="honesty-pledge" />
+            <label for="honesty-pledge">
+              <strong>Honesty Pledge</strong><br>
+              I affirm that the information provided above is accurate and is a true reflection of the work I have completed. I understand submitting false information could result in a negative review on Upwork, refund, and account suspension.
+            </label>
+          </div>
+
+          <button class="btn" type="submit">Submit Entry</button>
+          <div class="toast" id="toast">✓ Entry submitted!</div>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══ TAB: ALL ENTRIES ═══ -->
+  <div class="tab-panel" id="tab-entries">
+    <div style="max-width:1200px;margin:0 auto;padding-top:8px">
+      <div class="fl-tab-header">
+        <h2>All Entries</h2>
+      </div>
+      <div class="card">
+        <div id="entries-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">No entries yet — submit one from the Log Entry tab.</div>
+        <div style="overflow-x:auto" id="entries-table-wrap" style="display:none">
+          <table>
+            <thead>
+              <tr>
+                <th>Action Date</th>
+                <th>Submitted</th>
+                <th>Freelancer</th>
+                <th>Task Type</th>
+                <th>Count / Hrs / $</th>
+                <th>Project Type</th>
+                <th>Description</th>
+                <th>Country</th>
+                <th>File</th>
+                <th class="r" style="color:#1a7f3c">Earnings</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="log-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB: FREELANCERS ═══ -->
+  <div class="tab-panel" id="tab-freelancers">
+
+    <div id="fl-unlocked">
+      <div class="fl-tab-header">
+        <h2>Freelancer Directory</h2>
+        <div class="fl-tab-actions">
+        </div>
+      </div>
+      <div class="fl-table-wrap card">
+        <div class="no-freelancers" id="fl-empty">No freelancers registered yet.</div>
+        <table id="fl-table" style="display:none">
+          <thead>
+            <tr>
+              <th>Upwork Name</th><th>Team</th><th>Email</th>
+              <th>Device</th><th>NDA</th><th>ID</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="fl-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ═══ TAB: PAY RUN ═══ -->
+  <div class="tab-panel" id="tab-payrun">
+    <div style="max-width:960px;margin:0 auto;padding-top:8px">
+      <div class="fl-tab-header">
+        <h2>Pay Run</h2>
+      </div>
+
+      <!-- Date range filter -->
+      <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+          <div>
+            <label style="margin-bottom:6px;display:block">From</label>
+            <input type="date" id="pr-from" style="margin-bottom:0;width:auto" />
+          </div>
+          <div>
+            <label style="margin-bottom:6px;display:block">To</label>
+            <input type="date" id="pr-to" style="margin-bottom:0;width:auto" />
+          </div>
+          <button class="btn" style="margin-bottom:2px" onclick="runPayRun()">Run Pay Run</button>
+        </div>
+      </div>
+
+      <div id="pr-empty" style="display:none;text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem"></div>
+      <div id="pr-results"></div>
+    </div>
+  </div>
+
+  <!-- ═══ TAB: ADD FREELANCER ═══ -->
+  <div class="tab-panel" id="tab-add-freelancer">
+    <div class="card" style="max-width:620px;margin:24px auto">
+      <h2>Add Freelancer</h2>
+
+      <div id="reg-success" style="display:none;text-align:center;padding:40px 0">
+        <div style="font-size:3rem;margin-bottom:12px">🎉</div>
+        <div style="font-size:1.2rem;font-weight:700;margin-bottom:8px">Freelancer Registered!</div>
+        <div style="color:#6e6e73;margin-bottom:24px">They've been added to the directory.</div>
+        <button class="btn" onclick="showAddAnother()">Add Another</button>
+      </div>
+
+      <div id="reg-form-body">
+        <div class="error-msg" id="modal-error"></div>
+
+        <div class="form-section">
+          <div class="section-label">Basic Information</div>
+          <div class="callout callout-amber">
+            <span class="callout-icon">⚠️</span>
+            <span><strong>Your name as displayed on Upwork</strong> — please copy &amp; paste directly from Upwork to avoid mismatches.</span>
+          </div>
+          <label for="m-name">Upwork Display Name</label>
+          <input id="m-name" type="text" placeholder="Paste from Upwork…" />
+          <label for="m-team">Team</label>
+          <select id="m-team">
+            <option value="">— select team —</option>
+            <option value="Redemption">Redemption</option>
+            <option value="Approval">Approval</option>
+            <option value="Support">Support</option>
+            <option value="Data Checking">Data Checking</option>
+          </select>
+          <label for="m-email">Email Address</label>
+          <div class="callout callout-blue" style="margin-bottom:10px">
+            <span class="callout-icon">📌</span>
+            <span>Should be the <strong>same email</strong> you used to sign up to Noctua Workflow.</span>
+          </div>
+          <input id="m-email" type="email" placeholder="you@example.com" />
+          <label for="m-dob">Date of Birth</label>
+          <input id="m-dob" type="date" />
+        </div>
+
+        <div class="form-section">
+          <div class="section-label">Device Ownership</div>
+          <label style="margin-bottom:10px">Do you own the laptop / computer you use for working on our tasks?</label>
+          <div class="radio-group">
+            <label class="radio-option"><input type="radio" name="device" value="yes" /> Yes, I own it</label>
+            <label class="radio-option"><input type="radio" name="device" value="no" /> No, I don't own it</label>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-label">Disclaimers &amp; Compliance</div>
+          <div class="check-item">
+            <input type="checkbox" id="chk-password" />
+            <label for="chk-password">
+              <strong>Security Acknowledgement</strong><br>
+              I understand I should <strong>NOT</strong> share my passwords or login details with anyone.
+            </label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="chk-fraud" />
+            <label for="chk-fraud">
+              <strong>Internal Fraud Awareness</strong><br>
+              I have reviewed the <a href="https://noctua-team.notion.site/Internal-Fraud-Guidelines-e1276a5c21ab41338a5e00139dc9a1a3?pvs=4" target="_blank" rel="noopener">Internal Fraud Guidelines</a>.
+            </label>
+          </div>
+          <div class="check-item">
+            <input type="checkbox" id="chk-nda" />
+            <label for="chk-nda">
+              <strong>NDA Acknowledgement</strong><br>
+              I have <a href="https://drive.google.com/file/d/1Rr_Owr80EyRTC9mwlUSWVNvCkgKvOIy1/view?usp=sharing" target="_blank" rel="noopener">downloaded and signed the NDA</a>.
+            </label>
+          </div>
+          <div class="file-upload" id="nda-upload-area">
+            <input type="file" id="nda-file" accept=".pdf,.jpg,.jpeg,.png,.heic" />
+            <div class="file-upload-icon">📄</div>
+            <div class="file-upload-label">Upload signed NDA (PDF or image)</div>
+            <div class="file-upload-name" id="nda-file-name" style="display:none"></div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="section-label">ID Verification</div>
+          <div class="callout callout-blue">
+            <span class="callout-icon">👉</span>
+            <div>
+              Upload a photo of <strong>you holding your own ID</strong> (front side, with picture).<br>
+              Accepted: Passport, Driver's License, National ID Card.
+            </div>
+          </div>
+          <div class="file-upload" id="id-upload-area">
+            <input type="file" id="id-file" accept="image/*,.pdf,.heic" />
+            <div class="file-upload-icon">🪪</div>
+            <div class="file-upload-label">Upload photo with ID</div>
+            <div class="file-upload-name" id="id-file-name" style="display:none"></div>
+          </div>
+        </div>
+
+        <button class="btn" type="button" onclick="handleRegisterSubmit()">Register Freelancer</button>
+      </div>
+    </div>
+  </div>
+
+</div><!-- /#app -->
+
+<script>
+  /* ══════════════════════════════════════════
+     CONSTANTS & STORAGE
+  ══════════════════════════════════════════ */
+  const ENTRIES_KEY     = 'freelancer_entries_v2';
+  const FREELANCERS_KEY = 'freelancer_directory_v2';
+  const TEAMS           = ['Redemption','Approval','Support','Data Checking'];
+
+
+  /* in-memory fallback when localStorage is unavailable (e.g. data: URL preview) */
+  const _mem = {};
+  function storageGet(key)      { try { return localStorage.getItem(key); }      catch { return _mem[key] || null; } }
+  function storageSet(key, val) { try { localStorage.setItem(key, val); }        catch { _mem[key] = val; } }
+
+  function loadEntries()     { try { return JSON.parse(storageGet(ENTRIES_KEY))     || []; } catch { return []; } }
+  function loadFreelancers() { try { return JSON.parse(storageGet(FREELANCERS_KEY)) || []; } catch { return []; } }
+  function saveEntries(v)     { storageSet(ENTRIES_KEY,     JSON.stringify(v)); }
+  function saveFreelancers(v) { storageSet(FREELANCERS_KEY, JSON.stringify(v)); }
+
+
+  /* ══════════════════════════════════════════
+     HELPERS
+  ══════════════════════════════════════════ */
+  function fmt(n)     { return '$' + n.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 }); }
+  function esc(s)     { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmtH(h)    { return (h||0) % 1 === 0 ? (h||0) : (h||0).toFixed(2); }
+  function teamCls(t) { return 'team-' + (t||'Other').replace(/\s+/g,''); }
+  function teamBadge(t){ return `<span class="team-badge ${teamCls(t)}">${esc(t||'—')}</span>`; }
+
+  function calcAmount(taskType, actionCount) {
+    const n = parseFloat(actionCount) || 0;
+    if (taskType === 'hourly')               return +(n * 5).toFixed(2);
+    if (taskType === 'adhoc')                return +n.toFixed(2);
+    if (taskType.startsWith('approval'))     return +(n * 0.02).toFixed(2);
+    return 0;
+  }
+
+  function taskTypeLabel(t) {
+    return { hourly:'Hourly', adhoc:'Adhoc', 'approval-au':'Approval (AU)',
+             'approval-ca':'Approval (CA)', 'approval-us':'Approval (US)',
+             'approval-email':'Approval (Email)' }[t] || t;
+  }
+
+  function typeBadgeClass(t) {
+    if (t === 'hourly') return 'type-hourly';
+    if (t === 'adhoc')  return 'type-adhoc';
+    return 'type-approval';
+  }
+
+  /* ══════════════════════════════════════════
+     INDEXEDDB FILE STORAGE
+  ══════════════════════════════════════════ */
+
+  /* ══════════════════════════════════════════
+     ADMIN AUTH
+  ══════════════════════════════════════════ */
+
+  /* ══════════════════════════════════════════
+     TAB SWITCHING
+  ══════════════════════════════════════════ */
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      if (btn.dataset.tab === 'freelancers') {
+        renderFreelancerTable();
+      }
+    });
+  });
+
+  /* ══════════════════════════════════════════
+     COPY REGISTRATION LINK
+  ══════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════
+     TASK TYPE CONDITIONAL LOGIC
+  ══════════════════════════════════════════ */
+  const ACTION_COUNT_LABELS = {
+    'hourly':         'Hours Worked',
+    'adhoc':          'Project Amount ($)',
+    'approval-au':    'Action Count',
+    'approval-ca':    'Action Count',
+    'approval-us':    'Action Count',
+    'approval-email': 'Action Count',
+  };
+
+  const ACTION_COUNT_PLACEHOLDERS = {
+    'hourly':         'e.g. 2.35',
+    'adhoc':          'e.g. 23.30',
+    'approval-au':    'e.g. 150',
+    'approval-ca':    'e.g. 150',
+    'approval-us':    'e.g. 150',
+    'approval-email': 'e.g. 150',
+  };
+
+  function updateCalcPreview() {
+    const v   = document.getElementById('task-type').value;
+    const n   = parseFloat(document.getElementById('action-count').value) || 0;
+    const prev = document.getElementById('action-calc-preview');
+    const summary = document.getElementById('calc-summary');
+    if (!v || !n) {
+      prev.style.display = 'none';
+      summary.style.display = 'none';
+      return;
+    }
+    const amt = calcAmount(v, n);
+    prev.textContent = `→ Calculated pay: ${fmt(amt)}`;
+    prev.style.display = '';
+
+    const isApproval = v.startsWith('approval');
+    const rateStr  = v === 'hourly' ? '$5.00 / hr' : isApproval ? '$0.02 / action' : 'Direct amount';
+    const countLbl = v === 'hourly' ? 'Hours Worked' : isApproval ? 'Action Count' : 'Amount ($)';
+    const countVal = v === 'hourly' ? `${n} hrs` : isApproval ? n : `$${n.toFixed(2)}`;
+    document.getElementById('cs-type-label').textContent  = 'Task Type';
+    document.getElementById('cs-type-val').textContent    = taskTypeLabel(v);
+    document.getElementById('cs-count-label').textContent = countLbl;
+    document.getElementById('cs-count-val').textContent   = countVal;
+    document.getElementById('cs-rate-val').textContent    = rateStr;
+    document.getElementById('cs-total-val').textContent   = fmt(amt);
+    summary.style.display = 'block';
+  }
+
+  document.getElementById('task-type').addEventListener('change', function() {
+    const v = this.value;
+    const isApproval = v.startsWith('approval');
+    document.getElementById('rate-hint').textContent   = v ? `💰 ${v === 'hourly' ? '$5.00 per hour' : v === 'adhoc' ? 'Amount entered = final pay' : '$0.02 per action'}` : '';
+    document.getElementById('rate-hint').style.display = v ? '' : 'none';
+    document.getElementById('section-action-count').style.display = v ? 'block' : 'none';
+    document.getElementById('section-project-type').style.display = (v === 'hourly' || v === 'adhoc') ? 'block' : 'none';
+    document.getElementById('hourly-calc-guide').style.display    = v === 'hourly' ? 'block' : 'none';
+    document.getElementById('section-filename').style.display     = isApproval ? 'none' : '';
+    document.getElementById('section-desc').style.display         = isApproval ? 'none' : '';
+    document.getElementById('action-count-label').textContent     = ACTION_COUNT_LABELS[v] || 'Action Count';
+    document.getElementById('action-count').placeholder           = ACTION_COUNT_PLACEHOLDERS[v] || 'e.g. 1';
+    document.getElementById('action-count').step                  = isApproval ? '1'    : '0.01';
+    document.getElementById('action-count').min                   = isApproval ? '1'    : '0.01';
+    updateCalcPreview();
+  });
+
+  document.getElementById('action-count').addEventListener('input', updateCalcPreview);
+
+  /* ══════════════════════════════════════════
+     PROJECT TYPE SELECT
+  ══════════════════════════════════════════ */
+  function toggleAdhocNewRow() {
+    const row = document.getElementById('adhoc-new-row');
+    const showing = row.style.display === 'flex';
+    row.style.display = showing ? 'none' : 'flex';
+    if (!showing) document.getElementById('adhoc-new-name').focus();
+  }
+
+  function toggleManageProjectTypes() {
+    const panel = document.getElementById('manage-project-types');
+    const showing = panel.style.display === 'block';
+    if (showing) {
+      panel.style.display = 'none';
+    } else {
+      const list = document.getElementById('manage-project-list');
+      const sel = document.getElementById('adhoc-subtask');
+      list.innerHTML = '';
+      Array.from(sel.options).forEach(opt => {
+        if (!opt.value) return;
+        const row = document.createElement('div');
+        row.className = 'manage-pt-row';
+        row.innerHTML = `<span>${opt.textContent}</span><button type="button" class="manage-pt-del" onclick="deleteProjectType('${opt.value.replace(/'/g,"\\'")}')">✕</button>`;
+        list.appendChild(row);
+      });
+      panel.style.display = 'block';
+      document.getElementById('adhoc-new-row').style.display = 'none';
+    }
+  }
+
+  function deleteProjectType(name) {
+    const sel = document.getElementById('adhoc-subtask');
+    const opt = Array.from(sel.options).find(o => o.value === name);
+    if (opt) sel.removeChild(opt);
+    if (sel.value === name) sel.value = '';
+    toggleManageProjectTypes();
+    toggleManageProjectTypes();
+  }
+
+  function saveNewProjectType() {
+    const name = document.getElementById('adhoc-new-name').value.trim();
+    if (!name) return;
+    const sel = document.getElementById('adhoc-subtask');
+    const existing = Array.from(sel.options).map(o => o.value.toLowerCase());
+    if (existing.includes(name.toLowerCase())) {
+      alert('This project type already exists.'); return;
+    }
+    const opt = document.createElement('option');
+    opt.value = name; opt.textContent = name;
+    sel.appendChild(opt);
+    sel.value = name;
+    document.getElementById('adhoc-new-name').value = '';
+    document.getElementById('adhoc-new-row').style.display = 'none';
+  }
+
+  /* ══════════════════════════════════════════
+     FREELANCER DROPDOWN
+  ══════════════════════════════════════════ */
+  function refreshFreelancerSelect() {
+    const fls  = loadFreelancers();
+    const sel  = document.getElementById('fl-select');
+    const hint = document.getElementById('fl-hint');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select a freelancer —</option>';
+    if (!fls.length) { hint.style.display = ''; return; }
+    hint.style.display = 'none';
+    const groups = {};
+    fls.forEach(f => { const t=f.team||'Other'; (groups[t]=groups[t]||[]).push(f); });
+    [...TEAMS,'Other'].forEach(team => {
+      if (!groups[team]) return;
+      const og = document.createElement('optgroup');
+      og.label = team;
+      groups[team].sort((a,b) => a.name.localeCompare(b.name)).forEach(f => {
+        const o = document.createElement('option');
+        o.value = f.id; o.textContent = f.name;
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    });
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+  }
+
+  /* ══════════════════════════════════════════
+     ENTRY FORM SUBMIT
+  ══════════════════════════════════════════ */
+  function handleEntrySubmit(e) {
+    e.preventDefault();
+    const flId     = document.getElementById('fl-select').value;
+    const taskType = document.getElementById('task-type').value;
+    const date     = document.getElementById('entry-date').value;
+    const country  = document.getElementById('entry-country').value;
+    const desc     = document.getElementById('entry-desc').value.trim();
+    const fileName = document.getElementById('entry-filename').value.trim();
+    const pledge   = document.getElementById('honesty-pledge').checked;
+
+    if (!flId)    { document.getElementById('fl-select').focus(); return; }
+    if (!taskType){ document.getElementById('task-type').focus(); return; }
+    if (!pledge)  { document.getElementById('honesty-pledge').scrollIntoView({behavior:'smooth',block:'center'}); return; }
+
+    const actionCount = parseFloat(document.getElementById('action-count').value) || 0;
+    if (!actionCount) { document.getElementById('action-count').focus(); return; }
+
+    const adhocSubTask = (taskType === 'hourly' || taskType === 'adhoc')
+      ? document.getElementById('adhoc-subtask').value : '';
+
+    const fl     = loadFreelancers().find(f => f.id === flId);
+    const amount = calcAmount(taskType, actionCount);
+    const ents   = loadEntries();
+
+    ents.push({
+      freelancerId: flId,
+      nameSnapshot: fl?.name || '',
+      teamSnapshot: fl?.team || '',
+      date, taskType, actionCount, adhocSubTask,
+      country, fileName, description: desc, amount,
+      createdAt: new Date().toISOString(),
+    });
+
+    saveEntries(ents);
+    render();
+
+    // Reset
+    document.getElementById('task-type').value          = '';
+    document.getElementById('task-type').dispatchEvent(new Event('change'));
+    document.getElementById('entry-country').value      = '';
+    document.getElementById('entry-filename').value     = '';
+    document.getElementById('entry-desc').value         = '';
+    document.getElementById('honesty-pledge').checked   = false;
+    document.getElementById('action-count').value       = '';
+    document.getElementById('adhoc-subtask').value      = '';
+
+    const t = document.getElementById('toast');
+    t.style.display = 'block';
+    setTimeout(() => t.style.display = 'none', 2500);
+  }
+
+  /* ══════════════════════════════════════════
+     RENDER LOG & SUMMARY
+  ══════════════════════════════════════════ */
+  function render() {
+    const entries = loadEntries();
+    renderLog(entries);
+    document.getElementById('entries-empty').style.display      = entries.length ? 'none' : '';
+    document.getElementById('entries-table-wrap').style.display = entries.length ? ''     : 'none';
+  }
+
+  function renderLog(entries) {
+    const tbody = document.getElementById('log-body');
+    const flMap = Object.fromEntries(loadFreelancers().map(f => [f.id, f]));
+    tbody.innerHTML = '';
+    [...entries].reverse().forEach((e, ri) => {
+      const i  = entries.length - 1 - ri;
+      const fl = flMap[e.freelancerId];
+      const tr = document.createElement('tr');
+      const countLabel = e.taskType === 'hourly' ? `${fmtH(e.actionCount)} hrs`
+        : e.taskType === 'adhoc' ? `$${fmtH(e.actionCount)}`
+        : fmtH(e.actionCount);
+      const submitted = e.createdAt ? new Date(e.createdAt).toLocaleDateString('en-AU',{day:'2-digit',month:'short',year:'numeric'}) : '—';
+      tr.innerHTML = `
+        <td style="white-space:nowrap">${esc(e.date)}</td>
+        <td style="white-space:nowrap;font-size:0.82rem;color:#6e6e73">${submitted}</td>
+        <td>
+          <div class="freelancer-name">${esc(fl ? fl.name : (e.nameSnapshot||'?'))}</div>
+          <div style="margin-top:3px">${teamBadge(fl ? fl.team : e.teamSnapshot)}</div>
+        </td>
+        <td><span class="type-badge ${typeBadgeClass(e.taskType)}">${esc(taskTypeLabel(e.taskType))}</span></td>
+        <td style="color:#555;white-space:nowrap">${countLabel}</td>
+        <td>${e.adhocSubTask ? `<span class="pill">${esc(e.adhocSubTask)}</span>` : '<span style="color:#aaa">—</span>'}</td>
+        <td style="font-size:0.82rem;color:#555;max-width:180px">${esc(e.description||'')}</td>
+        <td style="font-size:0.85rem">${esc((e.country||'').toUpperCase())}</td>
+        <td style="font-size:0.8rem;color:#6e6e73">${esc(e.fileName||'')}</td>
+        <td style="text-align:right;font-weight:700;white-space:nowrap;color:#1a7f3c">${fmt(e.amount||0)}</td>
+        <td><button class="del-btn" data-i="${i}" title="Remove">×</button></td>
+      `;
+      tbody.appendChild(tr);
+    });
+    tbody.querySelectorAll('.del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Remove this entry?')) return;
+        const ents = loadEntries();
+        ents.splice(Number(btn.dataset.i), 1);
+        saveEntries(ents);
+        render();
+      });
+    });
+  }
+
+
+  /* ══════════════════════════════════════════
+     FREELANCER TABLE
+  ══════════════════════════════════════════ */
+  function renderFreelancerTable() {
+    const fls   = loadFreelancers();
+    const empty = document.getElementById('fl-empty');
+    const table = document.getElementById('fl-table');
+    const tbody = document.getElementById('fl-body');
+    if (!fls.length) { empty.style.display=''; table.style.display='none'; return; }
+    empty.style.display = 'none';
+    table.style.display = '';
+    tbody.innerHTML = '';
+    const groups = {};
+    fls.forEach(f => { const t=f.team||'Other'; (groups[t]=groups[t]||[]).push(f); });
+    [...TEAMS,'Other'].forEach(team => {
+      if (!groups[team]) return;
+      const sep = document.createElement('tr');
+      sep.className = 'group-row';
+      sep.innerHTML = `<td colspan="7">${esc(team)}</td>`;
+      tbody.appendChild(sep);
+      groups[team].sort((a,b) => a.name.localeCompare(b.name)).forEach(f => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="freelancer-name">${esc(f.name)}</td>
+          <td>${teamBadge(f.team)}</td>
+          <td style="font-size:0.85rem;color:#555">${esc(f.email)}</td>
+          <td style="font-size:0.85rem">${f.ownsDevice==='yes'?'✅ Yes':'❌ No'}</td>
+          <td style="font-size:0.82rem">${f.ndaFileName ? `<span class="status-dot dot-ok"></span>${esc(f.ndaFileName)}` : `<span style="color:#aaa">—</span>`}</td>
+          <td style="font-size:0.82rem">${f.idFileName  ? `<span class="status-dot dot-ok"></span>${esc(f.idFileName)}`  : `<span style="color:#aaa">—</span>`}</td>
+          <td><button class="del-btn" data-id="${esc(f.id)}" title="Remove">×</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+    });
+    tbody.querySelectorAll('.del-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (!confirm('Remove this freelancer? Their logged entries will be retained.')) return;
+        saveFreelancers(loadFreelancers().filter(f => f.id !== btn.dataset.id));
+        renderFreelancerTable();
+        refreshFreelancerSelect();
+      });
+    });
+  }
+
+  /* ══════════════════════════════════════════
+     REGISTRATION MODAL
+  ══════════════════════════════════════════ */
+  function wireFileUpload(inputId, areaId, nameId) {
+    const input = document.getElementById(inputId);
+    const area  = document.getElementById(areaId);
+    const nameEl= document.getElementById(nameId);
+    input.addEventListener('change', () => {
+      const f = input.files[0];
+      if (f) { area.classList.add('has-file'); nameEl.textContent='✓ '+f.name; nameEl.style.display=''; }
+      else   { area.classList.remove('has-file'); nameEl.style.display='none'; }
+    });
+  }
+  wireFileUpload('nda-file','nda-upload-area','nda-file-name');
+  wireFileUpload('id-file', 'id-upload-area', 'id-file-name');
+
+  function resetRegisterForm() {
+    ['m-name','m-team','m-email','m-dob'].forEach(id => document.getElementById(id).value = '');
+    document.querySelectorAll('input[name=device]').forEach(r => r.checked = false);
+    ['chk-password','chk-fraud','chk-nda'].forEach(id => document.getElementById(id).checked = false);
+    ['nda-file','id-file'].forEach(id => document.getElementById(id).value = '');
+    ['nda-upload-area','id-upload-area'].forEach(id => document.getElementById(id).classList.remove('has-file'));
+    ['nda-file-name','id-file-name'].forEach(id => document.getElementById(id).style.display = 'none');
+    document.getElementById('modal-error').style.display = 'none';
+  }
+
+  function showAddAnother() {
+    document.getElementById('reg-success').style.display  = 'none';
+    document.getElementById('reg-form-body').style.display = '';
+    resetRegisterForm();
+  }
+
+  function handleRegisterSubmit() {
+    const name   = document.getElementById('m-name').value.trim();
+    const team   = document.getElementById('m-team').value;
+    const email  = document.getElementById('m-email').value.trim();
+    const dob    = document.getElementById('m-dob').value;
+    const device = document.querySelector('input[name=device]:checked')?.value || '';
+    const chkPw  = document.getElementById('chk-password').checked;
+    const chkFr  = document.getElementById('chk-fraud').checked;
+    const chkNda = document.getElementById('chk-nda').checked;
+    const ndaF   = document.getElementById('nda-file').files[0];
+    const idF    = document.getElementById('id-file').files[0];
+    const errors = [];
+    if (!name)   errors.push('Upwork display name is required.');
+    if (!team)   errors.push('Please select a team.');
+    if (!email)  errors.push('Email address is required.');
+    if (!dob)    errors.push('Date of birth is required.');
+    if (!device) errors.push('Please indicate whether you own your device.');
+    if (!chkPw)  errors.push('Please acknowledge the security disclaimer.');
+    if (!chkFr)  errors.push('Please confirm you have reviewed the Internal Fraud Guidelines.');
+    if (!chkNda) errors.push('Please acknowledge the NDA.');
+    if (!ndaF)   errors.push('Please upload your signed NDA.');
+    if (!idF)    errors.push('Please upload your ID verification photo.');
+    if (errors.length) { alert(errors.join('\n')); return; }
+    const fls = loadFreelancers();
+    if (fls.some(f => f.name.toLowerCase() === name.toLowerCase())) {
+      alert('A freelancer with this Upwork name already exists.'); return;
+    }
+    const flId = 'fl_' + Date.now();
+    fls.push({ id:flId, name, team, email, dob, ownsDevice:device,
+      ndaFileName: ndaF ? ndaF.name : '',
+      idFileName:  idF  ? idF.name  : '',
+      registeredAt: new Date().toISOString() });
+    saveFreelancers(fls);
+    renderFreelancerTable();
+    refreshFreelancerSelect();
+    document.getElementById('reg-form-body').style.display = 'none';
+    document.getElementById('reg-success').style.display   = '';
+  }
+
+  /* ══════════════════════════════════════════
+     PAY RUN
+  ══════════════════════════════════════════ */
+  function runPayRun() {
+    const from = document.getElementById('pr-from').value;
+    const to   = document.getElementById('pr-to').value;
+    const emptyEl   = document.getElementById('pr-empty');
+    const resultsEl = document.getElementById('pr-results');
+
+    if (!from || !to) { alert('Please select both a From and To date.'); return; }
+    if (from > to)    { alert('From date must be before To date.'); return; }
+
+    const allEntries = loadEntries().filter(e => e.date >= from && e.date <= to);
+    const flMap = Object.fromEntries(loadFreelancers().map(f => [f.id, f]));
+
+    if (!allEntries.length) {
+      emptyEl.textContent = `No entries found between ${from} and ${to}.`;
+      emptyEl.style.display = '';
+      resultsEl.innerHTML = '';
+      return;
+    }
+    emptyEl.style.display = 'none';
+
+    // Group by freelancer
+    const groups = {};
+    allEntries.forEach(e => {
+      const key = e.freelancerId || e.nameSnapshot;
+      const fl  = flMap[e.freelancerId];
+      if (!groups[key]) groups[key] = {
+        name: fl?.name || e.nameSnapshot || '?',
+        team: fl?.team || e.teamSnapshot || '',
+        entries: [], total: 0
+      };
+      groups[key].entries.push(e);
+      groups[key].total += (e.amount || 0);
+    });
+
+    const sorted = Object.values(groups).sort((a,b) => b.total - a.total);
+    const grandTotal = sorted.reduce((s,g) => s + g.total, 0);
+
+    resultsEl.innerHTML = '';
+
+    sorted.forEach((g, gi) => {
+      const wrap = document.createElement('div');
+      wrap.className = 'pr-freelancer';
+
+      const header = document.createElement('div');
+      header.className = 'pr-fl-header';
+      header.innerHTML = `
+        <div class="pr-fl-left">
+          <div>
+            <div class="freelancer-name">${esc(g.name)}</div>
+            <div style="margin-top:3px">${teamBadge(g.team)}</div>
+          </div>
+          <div style="font-size:0.82rem;color:#6e6e73;margin-left:4px">${g.entries.length} entr${g.entries.length===1?'y':'ies'}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="pr-fl-total">${fmt(g.total)}</div>
+          <div class="pr-fl-chevron" id="chev-${gi}">▼</div>
+        </div>`;
+
+      const detail = document.createElement('div');
+      detail.className = 'pr-fl-detail';
+      detail.id = `pr-detail-${gi}`;
+      detail.innerHTML = `
+        <table>
+          <thead>
+            <tr>
+              <th>Action Date</th>
+              <th>Task Type</th>
+              <th>Count / Hrs / $</th>
+              <th>Project Type</th>
+              <th>Description</th>
+              <th>Country</th>
+              <th class="r" style="color:#1a7f3c">Earnings</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${g.entries.sort((a,b)=>a.date.localeCompare(b.date)).map(e => {
+              const countLabel = e.taskType==='hourly' ? `${fmtH(e.actionCount)} hrs`
+                : e.taskType==='adhoc' ? `$${fmtH(e.actionCount)}`
+                : fmtH(e.actionCount);
+              return `<tr>
+                <td style="white-space:nowrap">${esc(e.date)}</td>
+                <td><span class="type-badge ${typeBadgeClass(e.taskType)}">${esc(taskTypeLabel(e.taskType))}</span></td>
+                <td style="color:#555;white-space:nowrap">${countLabel}</td>
+                <td>${e.adhocSubTask?`<span class="pill">${esc(e.adhocSubTask)}</span>`:'<span style="color:#aaa">—</span>'}</td>
+                <td style="font-size:0.82rem;color:#555;max-width:160px">${esc(e.description||'')}</td>
+                <td style="font-size:0.85rem">${esc((e.country||'').toUpperCase())}</td>
+                <td style="text-align:right;font-weight:700;color:#1a7f3c;white-space:nowrap">${fmt(e.amount||0)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>`;
+
+      header.addEventListener('click', () => {
+        const open = detail.style.display === 'block';
+        detail.style.display = open ? 'none' : 'block';
+        document.getElementById(`chev-${gi}`).classList.toggle('open', !open);
+      });
+
+      wrap.appendChild(header);
+      wrap.appendChild(detail);
+      resultsEl.appendChild(wrap);
+    });
+
+    // Grand total
+    const gt = document.createElement('div');
+    gt.className = 'pr-grand-total';
+    gt.innerHTML = `<span>Total Pay Run (${sorted.length} freelancer${sorted.length===1?'':'s'}, ${allEntries.length} entries)</span><span>${fmt(grandTotal)}</span>`;
+    resultsEl.appendChild(gt);
+  }
+
+  /* ══════════════════════════════════════════
+     INIT
+  ══════════════════════════════════════════ */
+  refreshFreelancerSelect();
+  render();
+  document.getElementById('entry-date').value = new Date().toISOString().slice(0,10);
+  renderFreelancerTable();
+</script>
+</body>
+</html>
