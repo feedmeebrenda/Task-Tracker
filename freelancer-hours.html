@@ -478,7 +478,8 @@
             <option value="">— select task type —</option>
             <option value="hourly">Hourly Tasks</option>
             <option value="adhoc">Adhoc Projects</option>
-            <option value="approval">Approval</option>
+            <option value="approval">Approval ($0.02/action)</option>
+            <option value="email-receipts-3c">Email Receipts 3c ($0.03/action)</option>
           </select>
           <div class="rate-hint" id="rate-hint"></div>
 
@@ -527,6 +528,18 @@
               <div id="manage-project-list"></div>
               <button type="button" class="btn-sm" style="margin-top:6px" onclick="toggleManageProjectTypes()">Done</button>
             </div>
+          </div>
+
+          <div id="section-mgmt-account" style="display:none">
+            <label for="mgmt-account">Management Account</label>
+            <select id="mgmt-account">
+              <option value="">— select —</option>
+              <option value="Data processing BAU">Data processing BAU</option>
+              <option value="Support">Support</option>
+              <option value="Data processing one off">Data processing one off</option>
+              <option value="Other">Other</option>
+              <option value="Redemption processing cost">Redemption processing cost</option>
+            </select>
           </div>
 
           <label for="entry-country">Country</label>
@@ -599,6 +612,7 @@
                 <th>Task Type</th>
                 <th>Count / Hrs / $</th>
                 <th>Project Type</th>
+                <th>Mgmt Account</th>
                 <th>Description</th>
                 <th>Country</th>
                 <th>File</th>
@@ -835,6 +849,27 @@
     'Jeffrey Meneses':'EN Redemption','Chau Ngo Bich':'EN Redemption',
   };
   const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun', 'reports']);
+
+  const HOURLY_PROJECTS = ['Alcohol Matching','Barcode check','Bonus','Data checks','Html templates','OCR label studio','PII redaction','Privacy request','Receipt check','Receipt Count Monitor','Redemption','Support','Support TL Cover Pay','Truth table','User checks','Product matching (ML)'];
+  const ADHOC_PROJECTS  = ['Annotation tool','Backlog bonus','Bonus','Email whitelist','Management','Marketing','Missed payment','Night shift bonus','Other (specify below)','Product matching (ML)','Retailer classifier','Training bonus'];
+
+  const MGMT_ACCOUNT_MAP = {
+    'approval':'Data processing BAU','email-receipts-3c':'Data processing BAU',
+    'Alcohol Matching':'Data processing one off','Annotation tool':'Data processing one off',
+    'Backlog bonus':'Data processing one off','Barcode check':'Data processing one off',
+    'Bonus':'Data processing one off','Data checks':'Data processing one off',
+    'Email whitelist':'Data processing one off','Html templates':'Data processing one off',
+    'Management':'Other','Marketing':'Other','Missed payment':'Other',
+    'Night shift bonus':'Support','OCR label studio':'Data processing one off',
+    'Other (specify below)':'Other','PII redaction':'Data processing one off',
+    'Privacy request':'Other','Product matching':'Data processing one off',
+    'Product matching (ML)':'Data processing one off',
+    'Receipt check':'Data processing one off','Receipt Count Monitor':'Data processing BAU',
+    'Redemption':'Redemption processing cost','Retailer classifier':'Data processing one off',
+    'Support':'Support','Support TL Cover Pay':'Support',
+    'Training bonus':'Data processing one off','Truth table':'Data processing one off',
+    'User checks':'Data processing one off',
+  };
   const TEAMS = ['Redemption','Approval','Support','Data Checking'];
 
   /* ══════════════════════════════════════════
@@ -881,14 +916,15 @@
 
   function calcAmount(taskType, actionCount) {
     const n = parseFloat(actionCount) || 0;
-    if (taskType === 'hourly')           return +(n * 5).toFixed(2);
-    if (taskType === 'adhoc')            return +n.toFixed(2);
-    if (taskType.startsWith('approval')) return +(n * 0.02).toFixed(2);
+    if (taskType === 'hourly')             return +(n * 5).toFixed(2);
+    if (taskType === 'adhoc')              return +n.toFixed(2);
+    if (taskType === 'email-receipts-3c')  return +(n * 0.03).toFixed(2);
+    if (taskType === 'approval')           return +(n * 0.02).toFixed(2);
     return 0;
   }
 
   function taskTypeLabel(t) {
-    return { hourly:'Hourly', adhoc:'Adhoc', approval:'Approval' }[t] || t;
+    return { hourly:'Hourly', adhoc:'Adhoc', approval:'Approval', 'email-receipts-3c':'Email Receipts 3c' }[t] || t;
   }
 
   function typeBadgeClass(t) {
@@ -970,10 +1006,12 @@
      TASK TYPE CONDITIONAL LOGIC
   ══════════════════════════════════════════ */
   const ACTION_COUNT_LABELS = {
-    'hourly':'Hours Worked', 'adhoc':'Project Amount ($)', 'approval':'Action Count',
+    'hourly':'Hours Worked', 'adhoc':'Project Amount ($)',
+    'approval':'Action Count', 'email-receipts-3c':'Action Count',
   };
   const ACTION_COUNT_PLACEHOLDERS = {
-    'hourly':'e.g. 2.35', 'adhoc':'e.g. 23.30', 'approval':'e.g. 150',
+    'hourly':'e.g. 2.35', 'adhoc':'e.g. 23.30',
+    'approval':'e.g. 150', 'email-receipts-3c':'e.g. 150',
   };
 
   function updateCalcPreview() {
@@ -997,10 +1035,37 @@
     summary.style.display = 'block';
   }
 
+  function populateProjectTypes(taskType) {
+    const sel = document.getElementById('adhoc-subtask');
+    const list = taskType === 'hourly' ? HOURLY_PROJECTS : ADHOC_PROJECTS;
+    const prev = sel.value;
+    sel.innerHTML = '<option value="">— select project type —</option>';
+    list.forEach(name => {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      sel.appendChild(o);
+    });
+    if (prev && list.includes(prev)) sel.value = prev;
+  }
+
+  function updateMgmtAccount() {
+    const taskType   = document.getElementById('task-type').value;
+    const projectType= document.getElementById('adhoc-subtask').value;
+    const sel        = document.getElementById('mgmt-account');
+    const section    = document.getElementById('section-mgmt-account');
+    if (!taskType) { section.style.display = 'none'; return; }
+    section.style.display = 'block';
+    const key = (taskType === 'approval' || taskType === 'email-receipts-3c')
+      ? taskType : projectType;
+    const auto = MGMT_ACCOUNT_MAP[key] || '';
+    if (auto) sel.value = auto;
+  }
+
   document.getElementById('task-type').addEventListener('change', function() {
     const v = this.value;
-    const isApproval = v.startsWith('approval');
-    document.getElementById('rate-hint').textContent   = v ? `💰 ${v==='hourly'?'$5.00 per hour':v==='adhoc'?'Amount entered = final pay':'$0.02 per action'}` : '';
+    const isApproval = v === 'approval' || v === 'email-receipts-3c';
+    const rateText = {'hourly':'$5.00 per hour','adhoc':'Amount entered = final pay','approval':'$0.02 per action','email-receipts-3c':'$0.03 per action'}[v] || '';
+    document.getElementById('rate-hint').textContent   = v ? `💰 ${rateText}` : '';
     document.getElementById('rate-hint').style.display = v ? '' : 'none';
     document.getElementById('section-action-count').style.display  = v ? 'block' : 'none';
     document.getElementById('section-project-type').style.display  = (v==='hourly'||v==='adhoc') ? 'block' : 'none';
@@ -1011,8 +1076,12 @@
     document.getElementById('action-count').placeholder            = ACTION_COUNT_PLACEHOLDERS[v] || 'e.g. 1';
     document.getElementById('action-count').step                   = isApproval ? '1' : '0.01';
     document.getElementById('action-count').min                    = isApproval ? '1' : '0.01';
+    if (v === 'hourly' || v === 'adhoc') populateProjectTypes(v);
+    updateMgmtAccount();
     updateCalcPreview();
   });
+
+  document.getElementById('adhoc-subtask').addEventListener('change', updateMgmtAccount);
 
   document.getElementById('action-count').addEventListener('input', updateCalcPreview);
 
@@ -1112,7 +1181,8 @@
     const actionCount = parseFloat(document.getElementById('action-count').value) || 0;
     if (!actionCount){ document.getElementById('action-count').focus(); return; }
 
-    const adhocSubTask = (taskType==='hourly'||taskType==='adhoc') ? document.getElementById('adhoc-subtask').value : '';
+    const adhocSubTask    = (taskType==='hourly'||taskType==='adhoc') ? document.getElementById('adhoc-subtask').value : '';
+    const managementAccount = document.getElementById('mgmt-account').value;
     const fls    = await loadFreelancers();
     const fl     = fls.find(f => f.id === flId);
     const amount = calcAmount(taskType, actionCount);
@@ -1126,7 +1196,7 @@
         nameSnapshot: fl?.name || '',
         teamSnapshot: fl?.team || '',
         date, taskType, actionCount, adhocSubTask,
-        country, fileName, description: desc, amount,
+        country, fileName, description: desc, amount, managementAccount,
         createdAt: new Date().toISOString(),
       });
 
@@ -1138,6 +1208,8 @@
       document.getElementById('honesty-pledge').checked = false;
       document.getElementById('action-count').value     = '';
       document.getElementById('adhoc-subtask').value    = '';
+      document.getElementById('mgmt-account').value     = '';
+      document.getElementById('section-mgmt-account').style.display = 'none';
 
       const t = document.getElementById('toast');
       t.style.display = 'block';
@@ -1193,6 +1265,7 @@
         <td><span class="type-badge ${typeBadgeClass(e.taskType)}">${esc(taskTypeLabel(e.taskType))}</span></td>
         <td style="color:#555;white-space:nowrap">${countLabel}</td>
         <td>${e.adhocSubTask?`<span class="pill">${esc(e.adhocSubTask)}</span>`:'<span style="color:#aaa">—</span>'}</td>
+        <td style="font-size:0.8rem;color:#555;white-space:nowrap">${esc(e.managementAccount||'—')}</td>
         <td style="font-size:0.82rem;color:#555;max-width:180px">${esc(e.description||'')}</td>
         <td style="font-size:0.85rem">${esc((e.country||'').toUpperCase())}</td>
         <td style="font-size:0.8rem;color:#6e6e73">${esc(e.fileName||'')}</td>
