@@ -1603,16 +1603,36 @@
 
   function parseBonusDateRange(desc, txDateISO) {
     if (!desc || !desc.trim()) return null;
-    const m = String(desc).match(/^(\d+)-(\d+)\s+(\w+)/i);
-    if (!m) return null;
-    const [, d1, d2, monthStr] = m;
     const year = txDateISO ? new Date(txDateISO).getFullYear() : new Date().getFullYear();
-    try {
-      const from = new Date(`${monthStr} ${d1}, ${year}`);
-      const to   = new Date(`${monthStr} ${d2}, ${year}`);
-      if (isNaN(from) || isNaN(to)) return null;
-      return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
-    } catch { return null; }
+    const s = String(desc).trim();
+
+    // Format A: "16-22 April" — same month
+    let m = s.match(/^(\d+)-(\d+)\s+(\w+)/i);
+    if (m) {
+      const [, d1, d2, mon] = m;
+      try {
+        const from = new Date(`${mon} ${d1}, ${year}`);
+        const to   = new Date(`${mon} ${d2}, ${year}`);
+        if (!isNaN(from) && !isNaN(to)) return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
+      } catch {}
+    }
+
+    // Format B: "26 Mar - 1 April" — cross-month
+    m = s.match(/^(\d+)\s+(\w+)\s*[-–]\s*(\d+)\s+(\w+)/i);
+    if (m) {
+      const [, d1, mon1, d2, mon2] = m;
+      try {
+        const from = new Date(`${mon1} ${d1}, ${year}`);
+        let   to   = new Date(`${mon2} ${d2}, ${year}`);
+        // handle cross-year (e.g. "30 Dec - 5 Jan")
+        if (!isNaN(from) && !isNaN(to)) {
+          if (from > to) to = new Date(`${mon2} ${d2}, ${year + 1}`);
+          return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
+        }
+      } catch {}
+    }
+
+    return null;
   }
 
   function toggleTrackerBlock(bodyId, chevId) {
@@ -1651,15 +1671,13 @@
       return nameToTeam[name.toLowerCase()] || 'Unassigned';
     }
 
-    // Load tracker entries from Firestore for reconciliation
+    // Load ALL tracker entries (no date filter) so cross-month bonus periods like
+    // "26 Mar - 1 April" can match entries from March even when the report is April-only.
     const allTrackerEntries = await loadEntries();
     const trackerByName = {};
     allTrackerEntries.forEach(e => {
       const name = (e.nameSnapshot || '').toLowerCase().trim();
-      const eDate = e.date || '';
-      if (name && (!from || eDate >= from) && (!to || eDate <= to)) {
-        (trackerByName[name] = trackerByName[name] || []).push(e);
-      }
+      if (name) (trackerByName[name] = trackerByName[name] || []).push(e);
     });
 
     // Group by team → freelancer
@@ -1788,7 +1806,7 @@
             const dateRange    = parseBonusDateRange(bonusTxn.period, bonusTxn.date);
             const periodEntries = dateRange
               ? allFlEntries.filter(e => e.date >= dateRange.from && e.date <= dateRange.to)
-              : allFlEntries;
+              : allFlEntries.filter(e => (!from || e.date >= from) && (!to || e.date <= to));
             const calcTotal = periodEntries.reduce((s,e) => s+(e.amount||0), 0);
             return { bonusTxn, dateRange, periodEntries, calcTotal, bi };
           });
