@@ -806,11 +806,11 @@
             </div>
           </div>
           <div>
-            <label>From</label>
+            <label>Work Period From</label>
             <input type="date" id="rpt-from" style="margin-bottom:0;width:auto" />
           </div>
           <div>
-            <label>To</label>
+            <label>Work Period To</label>
             <input type="date" id="rpt-to" style="margin-bottom:0;width:auto" />
           </div>
           <button class="btn" style="width:auto;padding:12px 24px;margin-bottom:2px" onclick="runReport()">Generate Report</button>
@@ -820,6 +820,7 @@
       <div id="rpt-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">Upload a CSV file and click Generate Report.</div>
       <div id="rpt-results" style="display:none">
         <div id="rpt-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
+        <div id="rpt-mgmt" style="margin-bottom:20px"></div>
         <div id="rpt-teams"></div>
       </div>
     </div>
@@ -869,6 +870,14 @@
 
   const HOURLY_PROJECTS = ['Alcohol Matching','Barcode check','Bonus','Data checks','Html templates','OCR label studio','PII redaction','Privacy request','Receipt check','Receipt Count Monitor','Redemption','Support','Support TL Cover Pay','Truth table','User checks','Product matching (ML)'];
   const ADHOC_PROJECTS  = ['Annotation tool','Backlog bonus','Bonus','Email whitelist','Management','Marketing','Missed payment','Night shift bonus','Other (specify below)','Product matching (ML)','Retailer classifier','Training bonus'];
+
+  const HOURLY_TEAM_MGMT = {
+    'EN Redemption': 'Redemption processing cost',
+    'EN Support':    'Support',
+    'Approval':      'Data processing BAU',
+    'Translations':  'Data processing one off',
+    'Management':    'Other',
+  };
 
   const MGMT_ACCOUNT_MAP = {
     'approval':'Data processing BAU','email-receipts-3c':'Data processing BAU',
@@ -1596,8 +1605,13 @@
       const base     = (bonusRow || hourlyRow)?.amount || 0;
       const fee      = feeRow?.amount || 0;
       const gst      = gstRow?.amount || 0;
-      const period   = source === 'tracker' ? g.enteredDesc : g.invoiceDesc;
-      return { id:g.id, freelancer:g.freelancer, date:g.date, jobTitle:g.jobTitle, source, base, fee, gst, total: base+fee+gst, period };
+      const period     = source === 'tracker' ? g.enteredDesc : g.invoiceDesc;
+      const workPeriod = source === 'tracker'
+        ? parseBonusDateRange(g.enteredDesc, g.date)
+        : parseInvoicePeriod(g.invoiceDesc);
+      const workFrom   = workPeriod?.from || g.date;
+      const workTo     = workPeriod?.to   || g.date;
+      return { id:g.id, freelancer:g.freelancer, date:g.date, jobTitle:g.jobTitle, source, base, fee, gst, total: base+fee+gst, period, workFrom, workTo };
     });
   }
 
@@ -1635,6 +1649,20 @@
     return null;
   }
 
+  function parseInvoicePeriod(desc) {
+    if (!desc) return null;
+    // "Invoice for Apr 20-Apr 26, 2026" or "Charge for Apr 20-Apr 26, 2026"
+    const m = String(desc).match(/for\s+(\w+\s+\d+)\s*-\s*(\w+\s+\d+),?\s*(\d{4})/i);
+    if (!m) return null;
+    const [, d1, d2, year] = m;
+    try {
+      const from = new Date(`${d1}, ${year}`);
+      const to   = new Date(`${d2}, ${year}`);
+      if (!isNaN(from) && !isNaN(to)) return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
+    } catch {}
+    return null;
+  }
+
   function toggleTrackerBlock(bodyId, chevId) {
     const body = document.getElementById(bodyId);
     const chev = document.getElementById(chevId);
@@ -1651,10 +1679,12 @@
     const from = document.getElementById('rpt-from').value;
     const to   = document.getElementById('rpt-to').value;
 
-    // Filter by date range if set
+    // Filter by WORK PERIOD start date, not payment date.
+    // This ensures cross-month payments (e.g. paid May 3, work Apr 30–May 6) fall
+    // into the correct month based on when the work was actually performed.
     let txns = _csvData;
-    if (from) txns = txns.filter(t => t.date >= from);
-    if (to)   txns = txns.filter(t => t.date <= to);
+    if (from) txns = txns.filter(t => t.workFrom >= from);
+    if (to)   txns = txns.filter(t => t.workFrom <= to);
     if (!txns.length) {
       emptyEl.textContent = 'No transactions found in the selected date range.';
       emptyEl.style.display = ''; resultsEl.style.display = 'none'; return;
@@ -1699,6 +1729,27 @@
     txns.forEach(t => { gBase+=t.base; gFee+=t.fee; gGst+=t.gst; gTotal+=t.total;
       if (t.source==='tracker') gTracker+=t.base; else gUpwork+=t.base; });
 
+    // Management account summary
+    // Tracker: sum Firestore entry amounts by management account, matched per bonus work period
+    // Hourly: attribute transaction base to team's default management account
+    const mgmtSummary = {};
+    function ensureMgmt(acct) {
+      if (!mgmtSummary[acct]) mgmtSummary[acct] = { trackerCalc:0, hourlyBase:0, hourlyFee:0 };
+      return mgmtSummary[acct];
+    }
+    txns.filter(t => t.source === 'tracker').forEach(t => {
+      const flName = t.freelancer.toLowerCase().trim();
+      const flEntries = trackerByName[flName] || [];
+      flEntries.filter(e => e.date >= t.workFrom && e.date <= t.workTo).forEach(e => {
+        ensureMgmt(e.managementAccount || 'Other').trackerCalc += (e.amount || 0);
+      });
+    });
+    txns.filter(t => t.source === 'upwork').forEach(t => {
+      const acct = HOURLY_TEAM_MGMT[getTeam(t.freelancer)] || 'Other';
+      ensureMgmt(acct).hourlyBase += t.base;
+      ensureMgmt(acct).hourlyFee  += t.fee + t.gst;
+    });
+
     // Summary cards
     const summaryEl = document.getElementById('rpt-summary');
     const cards = [
@@ -1714,6 +1765,49 @@
         <div style="font-size:1.35rem;font-weight:800;color:${c.color}">${c.val}</div>
         ${c.note?`<div style="font-size:0.72rem;color:#aaa;margin-top:2px">${c.note}</div>`:''}
       </div>`).join('');
+
+    // Management account summary table
+    const mgmtEl = document.getElementById('rpt-mgmt');
+    const mgmtRows = Object.entries(mgmtSummary)
+      .sort((a,b) => (b[1].trackerCalc+b[1].hourlyBase) - (a[1].trackerCalc+a[1].hourlyBase));
+    const mgmtTrackerTotal = mgmtRows.reduce((s,[,d])=>s+d.trackerCalc, 0);
+    const mgmtHourlyTotal  = mgmtRows.reduce((s,[,d])=>s+d.hourlyBase, 0);
+    const mgmtFeeTotal     = mgmtRows.reduce((s,[,d])=>s+d.hourlyFee, 0);
+    mgmtEl.innerHTML = `
+      <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+        <div style="padding:14px 20px;border-bottom:1px solid #f0f0f5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+          <span style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Cost by Management Account</span>
+          <span style="font-size:0.75rem;color:#aaa">Tracker = calculated from entries · Hourly = Upwork base charge · Fees = marketplace fee + GST</span>
+        </div>
+        <div style="overflow-x:auto">
+        <table style="font-size:0.85rem">
+          <thead><tr>
+            <th>Management Account</th>
+            <th class="r" style="color:#1a7f3c">Tracker (calc)</th>
+            <th class="r" style="color:#1e40af">Hourly (base)</th>
+            <th class="r" style="color:#92400e">Hourly fees+GST</th>
+            <th class="r">Total base</th>
+          </tr></thead>
+          <tbody>
+            ${mgmtRows.map(([acct, d]) => `
+              <tr>
+                <td style="font-weight:600">${esc(acct)}</td>
+                <td style="text-align:right;color:#1a7f3c">${d.trackerCalc>0?fmt(d.trackerCalc):'<span style="color:#ddd">—</span>'}</td>
+                <td style="text-align:right;color:#1e40af">${d.hourlyBase>0?fmt(d.hourlyBase):'<span style="color:#ddd">—</span>'}</td>
+                <td style="text-align:right;color:#92400e">${d.hourlyFee>0?fmt(d.hourlyFee):'<span style="color:#ddd">—</span>'}</td>
+                <td style="text-align:right;font-weight:700">${fmt(d.trackerCalc+d.hourlyBase)}</td>
+              </tr>`).join('')}
+          </tbody>
+          <tfoot><tr>
+            <td style="font-weight:700">Total</td>
+            <td style="text-align:right;font-weight:700;color:#1a7f3c">${fmt(mgmtTrackerTotal)}</td>
+            <td style="text-align:right;font-weight:700;color:#1e40af">${fmt(mgmtHourlyTotal)}</td>
+            <td style="text-align:right;font-weight:700;color:#92400e">${fmt(mgmtFeeTotal)}</td>
+            <td style="text-align:right;font-weight:700">${fmt(mgmtTrackerTotal+mgmtHourlyTotal)}</td>
+          </tfoot>
+        </table>
+        </div>
+      </div>`;
 
     // Team accordion
     const teamsEl = document.getElementById('rpt-teams');
