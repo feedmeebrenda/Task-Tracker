@@ -806,11 +806,11 @@
             </div>
           </div>
           <div>
-            <label>Work Period From</label>
+            <label>From (payment date)</label>
             <input type="date" id="rpt-from" style="margin-bottom:0;width:auto" />
           </div>
           <div>
-            <label>Work Period To</label>
+            <label>To (payment date)</label>
             <input type="date" id="rpt-to" style="margin-bottom:0;width:auto" />
           </div>
           <button class="btn" style="width:auto;padding:12px 24px;margin-bottom:2px" onclick="runReport()">Generate Report</button>
@@ -820,7 +820,9 @@
       <div id="rpt-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">Upload a CSV file and click Generate Report.</div>
       <div id="rpt-results" style="display:none">
         <div id="rpt-summary" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:20px"></div>
+        <div id="rpt-crossmonth" style="margin-bottom:0"></div>
         <div id="rpt-mgmt" style="margin-bottom:20px"></div>
+        <div id="rpt-country" style="margin-bottom:20px"></div>
         <div id="rpt-teams"></div>
       </div>
     </div>
@@ -870,6 +872,9 @@
 
   const HOURLY_PROJECTS = ['Alcohol Matching','Barcode check','Bonus','Data checks','Html templates','OCR label studio','PII redaction','Privacy request','Receipt check','Receipt Count Monitor','Redemption','Support','Support TL Cover Pay','Truth table','User checks','Product matching (ML)'];
   const ADHOC_PROJECTS  = ['Annotation tool','Backlog bonus','Bonus','Email whitelist','Management','Marketing','Missed payment','Night shift bonus','Other (specify below)','Product matching (ML)','Retailer classifier','Training bonus'];
+
+  const COUNTRY_SPLIT = { US: 0.60, CA: 0.25, AU: 0.15 };
+  const SPLIT_ACCOUNTS = new Set(['Redemption processing cost', 'Support']);
 
   const HOURLY_TEAM_MGMT = {
     'EN Redemption': 'Redemption processing cost',
@@ -1679,12 +1684,11 @@
     const from = document.getElementById('rpt-from').value;
     const to   = document.getElementById('rpt-to').value;
 
-    // Filter by WORK PERIOD start date, not payment date.
-    // This ensures cross-month payments (e.g. paid May 3, work Apr 30–May 6) fall
-    // into the correct month based on when the work was actually performed.
+    // Filter by Upwork payment date. A March payment is a March cost,
+    // even if the work period started in February (cross-month callout handles that below).
     let txns = _csvData;
-    if (from) txns = txns.filter(t => t.workFrom >= from);
-    if (to)   txns = txns.filter(t => t.workFrom <= to);
+    if (from) txns = txns.filter(t => t.date >= from);
+    if (to)   txns = txns.filter(t => t.date <= to);
     if (!txns.length) {
       emptyEl.textContent = 'No transactions found in the selected date range.';
       emptyEl.style.display = ''; resultsEl.style.display = 'none'; return;
@@ -1729,25 +1733,49 @@
     txns.forEach(t => { gBase+=t.base; gFee+=t.fee; gGst+=t.gst; gTotal+=t.total;
       if (t.source==='tracker') gTracker+=t.base; else gUpwork+=t.base; });
 
-    // Management account summary
-    // Tracker: sum Firestore entry amounts by management account, matched per bonus work period
-    // Hourly: attribute transaction base to team's default management account
+    // Cross-month detection: tracker bonuses paid in this period whose work period
+    // started before 'from' (e.g. paid March 5, work Feb 26 – Mar 4).
+    // The prior-month entries are legitimately part of this month's cost, but we
+    // call them out separately so finance can see the split.
+    const crossMonthItems = [];
+    if (from) {
+      txns.filter(t => t.source === 'tracker' && t.workFrom && t.workFrom < from).forEach(t => {
+        const flName = t.freelancer.toLowerCase().trim();
+        const priorEntries = (trackerByName[flName] || [])
+          .filter(e => e.date >= t.workFrom && e.date < from);
+        const priorAmt = priorEntries.reduce((s,e) => s+(e.amount||0), 0);
+        if (priorAmt > 0) crossMonthItems.push({ freelancer: t.freelancer, period: t.period, priorAmt });
+      });
+    }
+    const crossMonthTotal = crossMonthItems.reduce((s,i) => s+i.priorAmt, 0);
+
+    // Management account summary + country split data
     const mgmtSummary = {};
+    const countryData  = {};   // account → { tracker:{US,CA,AU,Unknown}, hourlyBase }
     function ensureMgmt(acct) {
       if (!mgmtSummary[acct]) mgmtSummary[acct] = { trackerCalc:0, hourlyBase:0, hourlyFee:0 };
       return mgmtSummary[acct];
     }
+    function ensureCountry(acct) {
+      if (!countryData[acct]) countryData[acct] = { tracker:{US:0,CA:0,AU:0,Unknown:0}, hourlyBase:0 };
+      return countryData[acct];
+    }
     txns.filter(t => t.source === 'tracker').forEach(t => {
       const flName = t.freelancer.toLowerCase().trim();
-      const flEntries = trackerByName[flName] || [];
-      flEntries.filter(e => e.date >= t.workFrom && e.date <= t.workTo).forEach(e => {
-        ensureMgmt(e.managementAccount || 'Other').trackerCalc += (e.amount || 0);
+      (trackerByName[flName] || []).filter(e => e.date >= t.workFrom && e.date <= t.workTo).forEach(e => {
+        const acct = e.managementAccount || 'Other';
+        ensureMgmt(acct).trackerCalc += (e.amount||0);
+        if (SPLIT_ACCOUNTS.has(acct)) {
+          const c = ['US','CA','AU'].includes((e.country||'').toUpperCase()) ? e.country.toUpperCase() : 'Unknown';
+          ensureCountry(acct).tracker[c] += (e.amount||0);
+        }
       });
     });
     txns.filter(t => t.source === 'upwork').forEach(t => {
       const acct = HOURLY_TEAM_MGMT[getTeam(t.freelancer)] || 'Other';
       ensureMgmt(acct).hourlyBase += t.base;
       ensureMgmt(acct).hourlyFee  += t.fee + t.gst;
+      if (SPLIT_ACCOUNTS.has(acct)) ensureCountry(acct).hourlyBase += t.base;
     });
 
     // Summary cards
@@ -1765,6 +1793,27 @@
         <div style="font-size:1.35rem;font-weight:800;color:${c.color}">${c.val}</div>
         ${c.note?`<div style="font-size:0.72rem;color:#aaa;margin-top:2px">${c.note}</div>`:''}
       </div>`).join('');
+
+    // Cross-month callout
+    const crossMonthEl = document.getElementById('rpt-crossmonth');
+    if (crossMonthTotal > 0) {
+      const periods = [...new Set(crossMonthItems.map(i=>i.period).filter(Boolean))];
+      crossMonthEl.style.marginBottom = '20px';
+      crossMonthEl.innerHTML = `
+        <div style="background:#fff8ed;border:1.5px solid #fcd34d;border-radius:12px;padding:12px 18px;display:flex;align-items:flex-start;gap:10px">
+          <span style="font-size:1.1rem;flex-shrink:0">⚠️</span>
+          <div>
+            <div style="font-size:0.82rem;font-weight:700;color:#92400e;margin-bottom:3px">Includes prior-month work — ${fmt(crossMonthTotal)}</div>
+            <div style="font-size:0.8rem;color:#78350f">
+              ${fmt(crossMonthTotal)} of this period's tracker entries cover work done before ${from}
+              ${periods.length ? ` (${periods.map(p=>esc(p)).join(', ')})` : ''}.
+              This is the tail of the previous period bundled into the first payrun of this month.
+            </div>
+          </div>
+        </div>`;
+    } else {
+      crossMonthEl.innerHTML = ''; crossMonthEl.style.marginBottom = '0';
+    }
 
     // Management account summary table
     const mgmtEl = document.getElementById('rpt-mgmt');
@@ -1808,6 +1857,65 @@
         </table>
         </div>
       </div>`;
+
+    // Country split table (Redemption & Support)
+    const countryEl = document.getElementById('rpt-country');
+    const splitRows = Object.entries(countryData).sort();
+    if (splitRows.length) {
+      const hasUnknown = splitRows.some(([,d]) => d.tracker.Unknown > 0);
+      const unknownTh = hasUnknown ? '<th class="r">Unknown</th>' : '';
+      countryEl.innerHTML = `
+        <div style="background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+          <div style="padding:14px 20px;border-bottom:1px solid #f0f0f5;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+            <span style="font-size:0.8rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Country Breakdown — Redemption &amp; Support</span>
+            <span style="font-size:0.75rem;color:#aaa">Tracker = actual country from entries · Hourly = fixed US 60% / CA 25% / AU 15%</span>
+          </div>
+          <div style="overflow-x:auto"><table style="font-size:0.85rem">
+            <thead><tr>
+              <th>Account</th><th>Source</th>
+              <th class="r">US</th><th class="r">CA</th><th class="r">AU</th>
+              ${unknownTh}<th class="r">Total</th>
+            </tr></thead>
+            <tbody>${splitRows.map(([acct, d]) => {
+              const tTotal = Object.values(d.tracker).reduce((s,v)=>s+v,0);
+              const hUS = d.hourlyBase * COUNTRY_SPLIT.US;
+              const hCA = d.hourlyBase * COUNTRY_SPLIT.CA;
+              const hAU = d.hourlyBase * COUNTRY_SPLIT.AU;
+              const cUS = (d.tracker.US||0)+hUS, cCA=(d.tracker.CA||0)+hCA, cAU=(d.tracker.AU||0)+hAU;
+              const cUnk= d.tracker.Unknown||0, cTot=tTotal+d.hourlyBase;
+              const f0 = v => v>0 ? fmt(v) : '<span style="color:#ddd">—</span>';
+              const unkTd = hasUnknown ? `<td style="text-align:right">${f0(cUnk)}</td>` : '';
+              const unkTr = hasUnknown ? `<td style="text-align:right">${f0(d.tracker.Unknown)}</td>` : '';
+              const unkBl = hasUnknown ? '<td></td>' : '';
+              return `
+                <tr style="border-top:2px solid #f0f0f5">
+                  <td rowspan="3" style="font-weight:600;vertical-align:middle">${esc(acct)}</td>
+                  <td style="font-size:0.75rem;color:#1a7f3c;white-space:nowrap">Tracker (actual)</td>
+                  <td style="text-align:right">${f0(d.tracker.US)}</td>
+                  <td style="text-align:right">${f0(d.tracker.CA)}</td>
+                  <td style="text-align:right">${f0(d.tracker.AU)}</td>
+                  ${unkTr}<td style="text-align:right;font-weight:600">${fmt(tTotal)}</td>
+                </tr>
+                <tr>
+                  <td style="font-size:0.75rem;color:#1e40af;white-space:nowrap">Hourly (60/25/15%)</td>
+                  <td style="text-align:right">${f0(hUS)}</td>
+                  <td style="text-align:right">${f0(hCA)}</td>
+                  <td style="text-align:right">${f0(hAU)}</td>
+                  ${unkBl}<td style="text-align:right;font-weight:600">${fmt(d.hourlyBase)}</td>
+                </tr>
+                <tr style="background:#f8f8fb">
+                  <td style="font-size:0.75rem;font-weight:700">Combined</td>
+                  <td style="text-align:right;font-weight:700">${fmt(cUS)}</td>
+                  <td style="text-align:right;font-weight:700">${fmt(cCA)}</td>
+                  <td style="text-align:right;font-weight:700">${fmt(cAU)}</td>
+                  ${unkTd}<td style="text-align:right;font-weight:700">${fmt(cTot)}</td>
+                </tr>`;
+            }).join('')}</tbody>
+          </table></div>
+        </div>`;
+    } else {
+      countryEl.innerHTML = '';
+    }
 
     // Team accordion
     const teamsEl = document.getElementById('rpt-teams');
