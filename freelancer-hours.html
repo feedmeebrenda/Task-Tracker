@@ -1824,17 +1824,17 @@
       if (key) (entriesByName[key] = entriesByName[key] || []).push(e);
     });
 
-    // reportData[mgmtAcct][type]['Tracker'|'Hourly'][taskLabel][country] += amount
-    // We use a nested structure: mgmtAcct → { Tracker: { taskLabel: { US, CA, AU, Unknown } }, Hourly: { ... } }
+    // reportData[mgmt][srcType][taskLabel][freelancer] = { US, CA, AU, Unknown }
     const reportData = {};
     let totalUpworkPaid = 0, totalFees = 0, totalGst = 0;
     let totalTrackerCalc = 0, totalHourlyBase = 0;
 
-    function ensureCell(mgmt, srcType, taskLabel) {
+    function ensureFL(mgmt, srcType, task, fl) {
       if (!reportData[mgmt]) reportData[mgmt] = {};
       if (!reportData[mgmt][srcType]) reportData[mgmt][srcType] = {};
-      if (!reportData[mgmt][srcType][taskLabel]) reportData[mgmt][srcType][taskLabel] = { US:0, CA:0, AU:0, Unknown:0 };
-      return reportData[mgmt][srcType][taskLabel];
+      if (!reportData[mgmt][srcType][task]) reportData[mgmt][srcType][task] = {};
+      if (!reportData[mgmt][srcType][task][fl]) reportData[mgmt][srcType][task][fl] = { US:0, CA:0, AU:0, Unknown:0 };
+      return reportData[mgmt][srcType][task][fl];
     }
 
     payments.forEach(p => {
@@ -1845,10 +1845,10 @@
 
         if (t.type === 'Hourly') {
           const mgmt = HOURLY_FL_MGMT[t.freelancer.toLowerCase().trim()];
-          if (!mgmt) return; // skip unknown (e.g. BR Redemption)
+          if (!mgmt) return;
           totalHourlyBase += t.base;
           Object.entries(RPT_COUNTRY_SPLIT).forEach(([c, pct]) => {
-            ensureCell(mgmt, 'Hourly', 'Hourly')[c] += t.base * pct;
+            ensureFL(mgmt, 'Hourly', 'Hourly', t.freelancer)[c] += t.base * pct;
           });
 
         } else if (t.type === 'Bonus') {
@@ -1862,9 +1862,8 @@
             const task    = entryTaskLabel(e);
             const country = ['US','CA','AU'].includes((e.country||'').toUpperCase())
               ? e.country.toUpperCase() : 'Unknown';
-            const amt = e.amount || 0;
-            ensureCell(mgmt, 'Tracker', task)[country] += amt;
-            totalTrackerCalc += amt;
+            ensureFL(mgmt, 'Tracker', task, e.nameSnapshot || t.freelancer)[country] += e.amount || 0;
+            totalTrackerCalc += e.amount || 0;
           });
         }
       });
@@ -1873,11 +1872,11 @@
     // Render summary cards
     const summaryEl = document.getElementById('rpt-summary');
     const cards = [
-      { label: 'Upwork Payments Total', val: fmt(totalUpworkPaid),   color: '#1d1d1f' },
-      { label: 'Tracker Calculated',    val: fmt(totalTrackerCalc),  color: '#1a7f3c', note: 'from entries' },
-      { label: 'Hourly Base',           val: fmt(totalHourlyBase),   color: '#1e40af', note: 'EN Support + Redemption' },
-      { label: 'Marketplace Fees',      val: fmt(totalFees),         color: '#92400e' },
-      { label: 'GST',                   val: fmt(totalGst),          color: '#6e6e73' },
+      { label: 'Upwork Payments Total', val: fmt(totalUpworkPaid),  color: '#1d1d1f' },
+      { label: 'Tracker Calculated',    val: fmt(totalTrackerCalc), color: '#1a7f3c', note: 'from entries' },
+      { label: 'Hourly Base',           val: fmt(totalHourlyBase),  color: '#1e40af', note: 'EN Support + Redemption' },
+      { label: 'Marketplace Fees',      val: fmt(totalFees),        color: '#92400e' },
+      { label: 'GST',                   val: fmt(totalGst),         color: '#6e6e73' },
     ];
     summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">` +
       cards.map(c => `
@@ -1887,100 +1886,118 @@
           ${c.note ? `<div style="font-size:0.72rem;color:#aaa;margin-top:2px">${c.note}</div>` : ''}
         </div>`).join('') + `</div>`;
 
-    // Render main report table
+    // Determine which countries have data
     const COUNTRIES = ['US', 'CA', 'AU', 'Unknown'];
     const visibleCountries = COUNTRIES.filter(c =>
       Object.values(reportData).some(types =>
         Object.values(types).some(tasks =>
-          Object.values(tasks).some(cell => (cell[c] || 0) > 0)
+          Object.values(tasks).some(flMap =>
+            Object.values(flMap).some(cell => (cell[c] || 0) > 0)
+          )
         )
       )
     );
 
-    const colCount = 3 + visibleCountries.length; // mgmt + type + task + countries + total
+    // Columns: Type | Task Type | Freelancer | <countries> | Total
+    const FIXED = 3;
+    const totalCols = FIXED + visibleCountries.length + 1;
+
+    const thStyle = `text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73`;
+    const thRStyle = `text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73`;
 
     let html = `
       <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
       <div style="overflow-x:auto"><table style="font-size:0.85rem;width:100%">
       <thead><tr style="background:#f5f5f7">
-        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Management Account</th>
-        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Type</th>
-        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Task Type</th>
-        ${visibleCountries.map(c => `<th style="text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">${c}</th>`).join('')}
-        <th style="text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Total</th>
+        <th style="${thStyle}">Type</th>
+        <th style="${thStyle}">Task Type</th>
+        <th style="${thStyle}">Freelancer</th>
+        ${visibleCountries.map(c => `<th style="${thRStyle}">${c}</th>`).join('')}
+        <th style="${thRStyle}">Total</th>
       </tr></thead><tbody>`;
 
-    // Sum a cell across selected countries
-    const cellTotal = cell => visibleCountries.reduce((s, c) => s + (cell[c] || 0), 0);
+    const sumCell  = cell => visibleCountries.reduce((s, c) => s + (cell[c] || 0), 0);
+    const sumFlMap = flMap => {
+      const agg = {}; visibleCountries.forEach(c => agg[c] = 0);
+      Object.values(flMap).forEach(cell => visibleCountries.forEach(c => agg[c] += cell[c] || 0));
+      return agg;
+    };
 
-    // Ordered management accounts (known ones first, then any unexpected extras)
     const allMgmts = [...new Set([...MGMT_ORDER, ...Object.keys(reportData)])].filter(m => reportData[m]);
-
-    const grandCountry = {};
-    visibleCountries.forEach(c => grandCountry[c] = 0);
+    const grandCountry = {}; visibleCountries.forEach(c => grandCountry[c] = 0);
     let grandTotal = 0;
 
-    allMgmts.forEach((mgmt, mi) => {
+    allMgmts.forEach(mgmt => {
       const types = reportData[mgmt];
-      const mgmtCountry = {};
-      visibleCountries.forEach(c => mgmtCountry[c] = 0);
-      let mgmtTotal = 0;
+      const mgmtAgg = {}; visibleCountries.forEach(c => mgmtAgg[c] = 0);
 
-      // Section header row for management account
-      html += `<tr style="background:#f0f4ff;border-top:2px solid #e0e0e5">
-        <td colspan="${colCount + 1}" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1d1d1f">${esc(mgmt)}</td>
+      // Management account section header (spans all columns)
+      html += `<tr style="background:#e8edf5;border-top:2px solid #c7d2e8">
+        <td colspan="${totalCols}" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1e3a5f">${esc(mgmt)}</td>
       </tr>`;
 
-      // Type order: Tracker first, then Hourly
-      const typeOrder = ['Tracker', 'Hourly'].filter(t => types[t]);
-      typeOrder.forEach(srcType => {
+      ['Tracker', 'Hourly'].filter(t => types[t]).forEach(srcType => {
         const tasks = types[srcType];
-        const taskLabels = Object.keys(tasks).sort();
+        Object.keys(tasks).sort().forEach((task, ti) => {
+          const flMap    = tasks[task];
+          const flNames  = Object.keys(flMap).sort();
+          const taskAgg  = sumFlMap(flMap);
+          const taskTot  = sumCell(taskAgg);
+          visibleCountries.forEach(c => mgmtAgg[c] += taskAgg[c]);
 
-        taskLabels.forEach((task, ti) => {
-          const cell = tasks[task];
-          const tot  = cellTotal(cell);
-          visibleCountries.forEach(c => mgmtCountry[c] += (cell[c] || 0));
-          mgmtTotal += tot;
+          // One row per freelancer
+          flNames.forEach((fl, fi) => {
+            const cell = flMap[fl];
+            const tot  = sumCell(cell);
+            html += `<tr style="border-top:1px solid #f0f0f5">
+              ${fi === 0 && ti === 0 ? `<td style="padding:7px 14px;font-size:0.8rem;color:#6e6e73;white-space:nowrap">${esc(srcType)}</td>` : `<td></td>`}
+              ${fi === 0 ? `<td style="padding:7px 14px;font-size:0.82rem;font-weight:600">${esc(task)}</td>` : `<td></td>`}
+              <td style="padding:7px 14px;font-size:0.82rem;color:#555">${esc(fl)}</td>
+              ${visibleCountries.map(c => `<td style="text-align:right;padding:7px 14px;white-space:nowrap">${(cell[c]||0)>0 ? fmt(cell[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
+              <td style="text-align:right;padding:7px 14px;font-weight:600;white-space:nowrap">${fmt(tot)}</td>
+            </tr>`;
+          });
 
-          const isFirstTask = ti === 0;
-          html += `<tr style="border-top:1px solid #f0f0f5">
-            ${isFirstTask
-              ? `<td style="padding:7px 14px;color:#6e6e73;font-size:0.8rem">${esc(srcType)}</td>`
-              : `<td style="padding:7px 14px"></td>`}
-            <td style="padding:7px 14px;font-size:0.82rem">${esc(task)}</td>
-            ${visibleCountries.map(c => `<td style="text-align:right;padding:7px 14px;white-space:nowrap">${(cell[c]||0) > 0 ? fmt(cell[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
-            <td style="text-align:right;padding:7px 14px;font-weight:600;white-space:nowrap">${fmt(tot)}</td>
-          </tr>`;
+          // Task subtotal row (only when multiple freelancers)
+          if (flNames.length > 1) {
+            html += `<tr style="background:#f9fafb;border-top:1px dashed #e0e0e5">
+              <td></td>
+              <td style="padding:6px 14px;font-size:0.78rem;color:#888;font-style:italic">Subtotal ${esc(task)}</td>
+              <td></td>
+              ${visibleCountries.map(c => `<td style="text-align:right;padding:6px 14px;font-weight:600;white-space:nowrap;font-size:0.82rem">${taskAgg[c]>0?fmt(taskAgg[c]):'<span style="color:#ddd">—</span>'}</td>`).join('')}
+              <td style="text-align:right;padding:6px 14px;font-weight:700;white-space:nowrap">${fmt(taskTot)}</td>
+            </tr>`;
+          }
         });
       });
 
-      // Management account subtotal row
-      visibleCountries.forEach(c => grandCountry[c] = (grandCountry[c] || 0) + mgmtCountry[c]);
+      // Management account subtotal
+      const mgmtTotal = sumCell(mgmtAgg);
+      visibleCountries.forEach(c => grandCountry[c] += mgmtAgg[c]);
       grandTotal += mgmtTotal;
-      html += `<tr style="background:#f8f8fb;border-top:1.5px solid #e0e0e5">
-        <td colspan="2" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1d1d1f">Subtotal</td>
-        ${visibleCountries.map(c => `<td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${mgmtCountry[c] > 0 ? fmt(mgmtCountry[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
+      html += `<tr style="background:#dde3f0;border-top:1.5px solid #b0bcd8">
+        <td colspan="3" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1e3a5f">Subtotal — ${esc(mgmt)}</td>
+        ${visibleCountries.map(c => `<td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${mgmtAgg[c]>0?fmt(mgmtAgg[c]):'<span style="color:#aaa">—</span>'}</td>`).join('')}
         <td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${fmt(mgmtTotal)}</td>
       </tr>`;
     });
 
-    // Grand total row
+    // Grand total
     html += `<tr style="background:#1d1d1f;color:#fff;border-top:2px solid #1d1d1f">
-      <td colspan="2" style="padding:10px 14px;font-weight:700">Grand Total</td>
-      ${visibleCountries.map(c => `<td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandCountry[c] || 0)}</td>`).join('')}
+      <td colspan="3" style="padding:10px 14px;font-weight:700">Grand Total</td>
+      ${visibleCountries.map(c => `<td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandCountry[c]||0)}</td>`).join('')}
       <td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandTotal)}</td>
     </tr>`;
 
-    // Fees rows
+    // Fees
     if (totalFees > 0 || totalGst > 0) {
       html += `<tr style="border-top:1px solid #f0f0f5">
-        <td colspan="2" style="padding:7px 14px;color:#92400e;font-size:0.82rem">Marketplace Fees</td>
+        <td colspan="3" style="padding:7px 14px;color:#92400e;font-size:0.82rem">Marketplace Fees</td>
         ${visibleCountries.map(() => `<td></td>`).join('')}
         <td style="text-align:right;padding:7px 14px;color:#92400e;font-weight:600">${fmt(totalFees)}</td>
       </tr>
       <tr style="border-top:1px solid #f0f0f5">
-        <td colspan="2" style="padding:7px 14px;color:#6e6e73;font-size:0.82rem">GST</td>
+        <td colspan="3" style="padding:7px 14px;color:#6e6e73;font-size:0.82rem">GST</td>
         ${visibleCountries.map(() => `<td></td>`).join('')}
         <td style="text-align:right;padding:7px 14px;color:#6e6e73;font-weight:600">${fmt(totalGst)}</td>
       </tr>`;
