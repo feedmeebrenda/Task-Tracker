@@ -821,6 +821,7 @@
       <div id="rpt-results" style="display:none">
         <div id="rpt-summary" style="margin-bottom:20px"></div>
         <div id="rpt-table"></div>
+        <div id="rpt-recon" style="margin-top:20px"></div>
       </div>
     </div>
   </div>
@@ -1826,6 +1827,7 @@
 
     // reportData[mgmt][srcType][taskLabel][freelancer] = { US, CA, AU, Unknown }
     const reportData = {};
+    const reconData  = []; // per-payment reconciliation data
     let totalUpworkPaid = 0, totalFees = 0, totalGst = 0;
     let totalBonusBase = 0, totalHourlyBase = 0;
 
@@ -1839,6 +1841,8 @@
 
     payments.forEach(p => {
       totalUpworkPaid += p.amount;
+      const reconPmt = { date: p.date, amount: p.amount, items: [] };
+
       p.transactions.forEach(t => {
         totalFees += t.fee;
         totalGst  += t.gst;
@@ -1850,6 +1854,7 @@
           Object.entries(RPT_COUNTRY_SPLIT).forEach(([c, pct]) => {
             ensureFL(mgmt, 'Hourly', 'Hourly', t.freelancer)[c] += t.base * pct;
           });
+          reconPmt.items.push({ type:'Hourly', freelancer:t.freelancer, period:t.enteredDesc||t.date, upworkPaid:t.base, fee:t.fee, gst:t.gst, trackerCalc:null, entries:[] });
 
         } else if (t.type === 'Bonus') {
           const period  = rptParsePeriod(t.enteredDesc, t.date);
@@ -1857,8 +1862,6 @@
           const entries = (entriesByName[flKey] || []).filter(e =>
             period ? (e.date >= period.from && e.date <= period.to) : false
           );
-          // Scale tracker entry amounts so they sum to the actual Upwork paid amount.
-          // This keeps the country/task breakdown proportional while making totals reconcile.
           const trackerCalcTotal = entries.reduce((s, e) => s + (e.amount || 0), 0);
           const scale = trackerCalcTotal > 0 ? t.base / trackerCalcTotal : 0;
           entries.forEach(e => {
@@ -1869,8 +1872,11 @@
             ensureFL(mgmt, 'Tracker', task, e.nameSnapshot || t.freelancer)[country] += (e.amount || 0) * scale;
           });
           totalBonusBase += t.base;
+          reconPmt.items.push({ type:'Bonus', freelancer:t.freelancer, period:t.enteredDesc||t.date, upworkPaid:t.base, fee:t.fee, gst:t.gst, trackerCalc:trackerCalcTotal, entries });
         }
       });
+
+      reconData.push(reconPmt);
     });
 
     // Render summary cards
@@ -2044,8 +2050,134 @@
       </div>`;
     tableEl.appendChild(gtBar);
 
+    // ── Reconciliation section ──────────────────────────────────────────
+    const reconEl = document.getElementById('rpt-recon');
+    reconEl.innerHTML = `<div style="font-size:0.78rem;font-weight:700;text-transform:uppercase;letter-spacing:0.05em;color:#6e6e73;margin-bottom:10px">Payment Reconciliation</div>`;
+
+    reconData.forEach((pmt, pi) => {
+      const bonusItems  = pmt.items.filter(i => i.type === 'Bonus');
+      const totalTrackerCalc = bonusItems.reduce((s, i) => s + (i.trackerCalc || 0), 0);
+      const totalBonusPaid   = bonusItems.reduce((s, i) => s + i.upworkPaid, 0);
+      const pmtVariance      = totalBonusPaid - totalTrackerCalc;
+      const varOk  = Math.abs(pmtVariance) < 0.01;
+      const varColor = varOk ? '#1a7f3c' : pmtVariance > 0 ? '#92400e' : '#b91c1c';
+      const varLabel = varOk ? '✓ Match' : (pmtVariance > 0 ? '+' : '') + fmt(pmtVariance);
+
+      const block = document.createElement('div');
+      block.style.cssText = 'margin-bottom:8px;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)';
+
+      const hdr = document.createElement('div');
+      hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:12px 18px;cursor:pointer;user-select:none;gap:12px;flex-wrap:wrap';
+      hdr.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="font-weight:600;font-size:0.9rem">Payment — ${pmt.date}</span>
+          <span style="font-size:0.78rem;color:#aaa">${pmt.items.length} transaction${pmt.items.length===1?'':'s'}</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
+          <div style="text-align:right">
+            <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:0.04em">Upwork paid</div>
+            <div style="font-weight:600;font-size:0.88rem">${fmt(pmt.amount)}</div>
+          </div>
+          ${bonusItems.length ? `<div style="text-align:right">
+            <div style="font-size:0.62rem;color:#aaa;text-transform:uppercase;letter-spacing:0.04em">Bonus variance</div>
+            <div style="font-weight:700;font-size:0.88rem;color:${varColor}">${varLabel}</div>
+          </div>` : ''}
+          <span id="rpt-rc-${pi}" style="font-size:0.8rem;color:#aaa;display:inline-block;transition:transform 0.2s">▼</span>
+        </div>`;
+
+      const detail = document.createElement('div');
+      detail.style.cssText = 'display:none;border-top:1px solid #f0f0f5;overflow-x:auto';
+
+      // Build inner table rows
+      let rows = '';
+      pmt.items.forEach((item, ii) => {
+        const isBon = item.type === 'Bonus';
+        const variance = isBon ? item.upworkPaid - (item.trackerCalc || 0) : null;
+        const vOk   = variance !== null && Math.abs(variance) < 0.01;
+        const vColor = variance === null ? '#aaa' : vOk ? '#1a7f3c' : variance > 0 ? '#92400e' : '#b91c1c';
+        const vLabel = variance === null ? '—' : vOk ? '✓' : (variance > 0 ? '+' : '') + fmt(variance);
+        const entId  = `rpt-ent-${pi}-${ii}`;
+        const chevId = `rpt-ent-chev-${pi}-${ii}`;
+
+        rows += `<tr style="border-top:1px solid #f5f5f7${isBon ? ';cursor:pointer' : ''}"
+          ${isBon ? `onclick="rptToggleRecon('${entId}','${chevId}')"` : ''}>
+          <td style="padding:9px 14px;font-size:0.85rem;font-weight:500">${esc(item.freelancer)}</td>
+          <td style="padding:9px 14px;font-size:0.8rem;color:#6e6e73;white-space:nowrap">${esc(item.period)}</td>
+          <td style="padding:9px 14px">
+            <span style="font-size:0.72rem;padding:2px 8px;border-radius:8px;font-weight:600;background:${isBon?'#d1fae5':'#dbeafe'};color:${isBon?'#065f46':'#1e40af'}">${item.type}</span>
+          </td>
+          <td style="padding:9px 14px;text-align:right;white-space:nowrap;font-weight:600">${fmt(item.upworkPaid)}</td>
+          <td style="padding:9px 14px;text-align:right;white-space:nowrap;color:#555">${isBon ? fmt(item.trackerCalc) : '—'}</td>
+          <td style="padding:9px 14px;text-align:right;white-space:nowrap;font-weight:700;color:${vColor}">${vLabel}</td>
+          <td style="padding:9px 14px;text-align:center;width:28px">${isBon ? `<span id="${chevId}" style="font-size:0.7rem;color:#aaa;display:inline-block;transition:transform 0.2s">▼</span>` : ''}</td>
+        </tr>
+        <tr id="${entId}" style="display:none">
+          <td colspan="7" style="padding:0;background:#f9fafb">`;
+
+        if (isBon) {
+          if (item.entries.length) {
+            rows += `<table style="width:100%;font-size:0.8rem;border-collapse:collapse">
+              <thead><tr style="background:#f0f0f5">
+                <th style="padding:6px 14px 6px 28px;text-align:left;font-size:0.68rem;color:#aaa;text-transform:uppercase;font-weight:600">Date</th>
+                <th style="padding:6px 14px;text-align:left;font-size:0.68rem;color:#aaa;text-transform:uppercase;font-weight:600">Task Type</th>
+                <th style="padding:6px 14px;text-align:left;font-size:0.68rem;color:#aaa;text-transform:uppercase;font-weight:600">Country</th>
+                <th style="padding:6px 14px;text-align:right;font-size:0.68rem;color:#aaa;text-transform:uppercase;font-weight:600">Count / Hrs</th>
+                <th style="padding:6px 14px;text-align:right;font-size:0.68rem;color:#aaa;text-transform:uppercase;font-weight:600">Tracker Calc</th>
+              </tr></thead><tbody>`;
+            item.entries.sort((a,b) => a.date.localeCompare(b.date)).forEach(e => {
+              const cl = e.taskType==='hourly' ? `${fmtH(e.actionCount)} hrs` : e.taskType==='adhoc' ? `$${fmtH(e.actionCount)}` : fmtH(e.actionCount);
+              rows += `<tr style="border-top:1px solid #ebebf0">
+                <td style="padding:6px 14px 6px 28px;color:#6e6e73">${esc(e.date)}</td>
+                <td style="padding:6px 14px">${esc(entryTaskLabel(e))}</td>
+                <td style="padding:6px 14px;color:#6e6e73">${esc(e.country||'—')}</td>
+                <td style="padding:6px 14px;text-align:right;color:#6e6e73">${cl}</td>
+                <td style="padding:6px 14px;text-align:right;color:#1a7f3c;font-weight:600">${fmt(e.amount||0)}</td>
+              </tr>`;
+            });
+            rows += `</tbody></table>`;
+          } else {
+            rows += `<div style="padding:10px 28px;font-size:0.8rem;color:#aaa">No tracker entries found for this period.</div>`;
+          }
+        }
+
+        rows += `</td></tr>`;
+      });
+
+      detail.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:0.85rem">
+        <thead><tr style="background:#fafafa">
+          <th style="padding:8px 14px;text-align:left;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Freelancer</th>
+          <th style="padding:8px 14px;text-align:left;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Period</th>
+          <th style="padding:8px 14px;text-align:left;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Type</th>
+          <th style="padding:8px 14px;text-align:right;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Upwork Paid</th>
+          <th style="padding:8px 14px;text-align:right;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Tracker Calc</th>
+          <th style="padding:8px 14px;text-align:right;font-size:0.7rem;color:#aaa;text-transform:uppercase;border-bottom:1px solid #eee">Variance</th>
+          <th style="border-bottom:1px solid #eee"></th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+
+      hdr.addEventListener('click', () => {
+        const open = detail.style.display === 'block';
+        detail.style.display = open ? 'none' : 'block';
+        document.getElementById(`rpt-rc-${pi}`).style.transform = open ? '' : 'rotate(180deg)';
+      });
+
+      block.appendChild(hdr);
+      block.appendChild(detail);
+      reconEl.appendChild(block);
+    });
+
     emptyEl.style.display = 'none';
     resultsEl.style.display = 'block';
+  }
+
+  function rptToggleRecon(rowId, chevId) {
+    const row  = document.getElementById(rowId);
+    const chev = document.getElementById(chevId);
+    if (!row) return;
+    const open = row.style.display === 'table-row';
+    row.style.display  = open ? 'none' : 'table-row';
+    if (chev) chev.style.transform = open ? '' : 'rotate(180deg)';
   }
 
   /* ══════════════════════════════════════════
