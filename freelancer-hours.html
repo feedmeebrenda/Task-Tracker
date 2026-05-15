@@ -1898,24 +1898,6 @@
       )
     );
 
-    // Columns: Type | Task Type | Freelancer | <countries> | Total
-    const FIXED = 3;
-    const totalCols = FIXED + visibleCountries.length + 1;
-
-    const thStyle = `text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73`;
-    const thRStyle = `text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73`;
-
-    let html = `
-      <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
-      <div style="overflow-x:auto"><table style="font-size:0.85rem;width:100%">
-      <thead><tr style="background:#f5f5f7">
-        <th style="${thStyle}">Type</th>
-        <th style="${thStyle}">Task Type</th>
-        <th style="${thStyle}">Freelancer</th>
-        ${visibleCountries.map(c => `<th style="${thRStyle}">${c}</th>`).join('')}
-        <th style="${thRStyle}">Total</th>
-      </tr></thead><tbody>`;
-
     const sumCell  = cell => visibleCountries.reduce((s, c) => s + (cell[c] || 0), 0);
     const sumFlMap = flMap => {
       const agg = {}; visibleCountries.forEach(c => agg[c] = 0);
@@ -1923,88 +1905,138 @@
       return agg;
     };
 
-    const allMgmts = [...new Set([...MGMT_ORDER, ...Object.keys(reportData)])].filter(m => reportData[m]);
-    const grandCountry = {}; visibleCountries.forEach(c => grandCountry[c] = 0);
-    let grandTotal = 0;
-
-    allMgmts.forEach(mgmt => {
-      const types = reportData[mgmt];
-      const mgmtAgg = {}; visibleCountries.forEach(c => mgmtAgg[c] = 0);
-
-      // Management account section header (spans all columns)
-      html += `<tr style="background:#e8edf5;border-top:2px solid #c7d2e8">
-        <td colspan="${totalCols}" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1e3a5f">${esc(mgmt)}</td>
-      </tr>`;
-
+    // Render the inner detail table for one management account
+    function renderDetail(types) {
+      const thS  = `text-align:left;padding:9px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73;border-bottom:1.5px solid #e8e8ee`;
+      const thRS = `text-align:right;padding:9px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73;border-bottom:1.5px solid #e8e8ee`;
+      let rows = '';
+      let firstType = true;
       ['Tracker', 'Hourly'].filter(t => types[t]).forEach(srcType => {
         const tasks = types[srcType];
-        Object.keys(tasks).sort().forEach((task, ti) => {
-          const flMap    = tasks[task];
-          const flNames  = Object.keys(flMap).sort();
-          const taskAgg  = sumFlMap(flMap);
-          const taskTot  = sumCell(taskAgg);
-          visibleCountries.forEach(c => mgmtAgg[c] += taskAgg[c]);
-
-          // One row per freelancer
+        let firstTask = true;
+        Object.keys(tasks).sort().forEach(task => {
+          const flMap   = tasks[task];
+          const flNames = Object.keys(flMap).sort();
+          const taskAgg = sumFlMap(flMap);
+          const taskTot = sumCell(taskAgg);
           flNames.forEach((fl, fi) => {
             const cell = flMap[fl];
             const tot  = sumCell(cell);
-            html += `<tr style="border-top:1px solid #f0f0f5">
-              ${fi === 0 && ti === 0 ? `<td style="padding:7px 14px;font-size:0.8rem;color:#6e6e73;white-space:nowrap">${esc(srcType)}</td>` : `<td></td>`}
-              ${fi === 0 ? `<td style="padding:7px 14px;font-size:0.82rem;font-weight:600">${esc(task)}</td>` : `<td></td>`}
-              <td style="padding:7px 14px;font-size:0.82rem;color:#555">${esc(fl)}</td>
-              ${visibleCountries.map(c => `<td style="text-align:right;padding:7px 14px;white-space:nowrap">${(cell[c]||0)>0 ? fmt(cell[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
-              <td style="text-align:right;padding:7px 14px;font-weight:600;white-space:nowrap">${fmt(tot)}</td>
+            rows += `<tr style="border-top:1px solid #f5f5f7">
+              <td style="padding:8px 14px;font-size:0.8rem;color:#6e6e73;white-space:nowrap;vertical-align:top">${fi===0&&firstTask&&firstType ? esc(srcType) : ''}</td>
+              <td style="padding:8px 14px;font-weight:${fi===0?'600':'400'};vertical-align:top">${fi===0 ? esc(task) : ''}</td>
+              <td style="padding:8px 14px;color:#555">${esc(fl)}</td>
+              ${visibleCountries.map(c => `<td style="text-align:right;padding:8px 14px;white-space:nowrap">${(cell[c]||0)>0 ? fmt(cell[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
+              <td style="text-align:right;padding:8px 14px;font-weight:600;white-space:nowrap">${fmt(tot)}</td>
             </tr>`;
+            if (fi===0) firstTask = false;
           });
-
-          // Task subtotal row (only when multiple freelancers)
           if (flNames.length > 1) {
-            html += `<tr style="background:#f9fafb;border-top:1px dashed #e0e0e5">
+            rows += `<tr style="background:#f5f7ff;border-top:1px dashed #dde3f0">
               <td></td>
-              <td style="padding:6px 14px;font-size:0.78rem;color:#888;font-style:italic">Subtotal ${esc(task)}</td>
+              <td style="padding:6px 14px;font-size:0.78rem;color:#888;font-style:italic">Subtotal — ${esc(task)}</td>
               <td></td>
-              ${visibleCountries.map(c => `<td style="text-align:right;padding:6px 14px;font-weight:600;white-space:nowrap;font-size:0.82rem">${taskAgg[c]>0?fmt(taskAgg[c]):'<span style="color:#ddd">—</span>'}</td>`).join('')}
+              ${visibleCountries.map(c => `<td style="text-align:right;padding:6px 14px;font-weight:600;white-space:nowrap">${taskAgg[c]>0?fmt(taskAgg[c]):'<span style="color:#ddd">—</span>'}</td>`).join('')}
               <td style="text-align:right;padding:6px 14px;font-weight:700;white-space:nowrap">${fmt(taskTot)}</td>
             </tr>`;
           }
         });
+        firstType = false;
+        firstTask = true;
       });
+      return `<div style="overflow-x:auto"><table style="font-size:0.85rem;width:100%;border-collapse:collapse">
+        <thead><tr>
+          <th style="${thS}">Type</th><th style="${thS}">Task Type</th><th style="${thS}">Freelancer</th>
+          ${visibleCountries.map(c=>`<th style="${thRS}">${c}</th>`).join('')}
+          <th style="${thRS}">Total</th>
+        </tr></thead><tbody>${rows}</tbody>
+      </table></div>`;
+    }
 
-      // Management account subtotal
+    const tableEl = document.getElementById('rpt-table');
+    tableEl.innerHTML = '';
+
+    const allMgmts = [...new Set([...MGMT_ORDER, ...Object.keys(reportData)])].filter(m => reportData[m]);
+    const grandCountry = {}; visibleCountries.forEach(c => grandCountry[c] = 0);
+    let grandTotal = 0;
+
+    allMgmts.forEach((mgmt, mi) => {
+      const types  = reportData[mgmt];
+      const mgmtAgg = {}; visibleCountries.forEach(c => mgmtAgg[c] = 0);
+      ['Tracker','Hourly'].filter(t=>types[t]).forEach(srcType =>
+        Object.values(types[srcType]).forEach(flMap =>
+          Object.values(flMap).forEach(cell =>
+            visibleCountries.forEach(c => mgmtAgg[c] += cell[c]||0)
+          )
+        )
+      );
       const mgmtTotal = sumCell(mgmtAgg);
       visibleCountries.forEach(c => grandCountry[c] += mgmtAgg[c]);
       grandTotal += mgmtTotal;
-      html += `<tr style="background:#dde3f0;border-top:1.5px solid #b0bcd8">
-        <td colspan="3" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1e3a5f">Subtotal — ${esc(mgmt)}</td>
-        ${visibleCountries.map(c => `<td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${mgmtAgg[c]>0?fmt(mgmtAgg[c]):'<span style="color:#aaa">—</span>'}</td>`).join('')}
-        <td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${fmt(mgmtTotal)}</td>
-      </tr>`;
+
+      const block = document.createElement('div');
+      block.style.cssText = 'margin-bottom:8px;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)';
+
+      const hdr = document.createElement('div');
+      hdr.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;user-select:none;gap:12px;flex-wrap:wrap';
+      hdr.innerHTML = `
+        <span style="font-weight:700;font-size:0.92rem">${esc(mgmt)}</span>
+        <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
+          ${visibleCountries.map(c => `
+            <div style="text-align:right">
+              <div style="font-size:0.65rem;color:#aaa;text-transform:uppercase;letter-spacing:0.04em">${c}</div>
+              <div style="font-size:0.88rem;font-weight:600">${mgmtAgg[c]>0?fmt(mgmtAgg[c]):'—'}</div>
+            </div>`).join('')}
+          <div style="text-align:right;border-left:1px solid #e0e0e5;padding-left:16px">
+            <div style="font-size:0.65rem;color:#aaa;text-transform:uppercase;letter-spacing:0.04em">Total</div>
+            <div style="font-size:1rem;font-weight:700">${fmt(mgmtTotal)}</div>
+          </div>
+          <span id="rpt-chev-${mi}" style="font-size:0.8rem;color:#aaa;transition:transform 0.2s;display:inline-block">▼</span>
+        </div>`;
+
+      const detail = document.createElement('div');
+      detail.style.cssText = 'display:none;border-top:1px solid #f0f0f5';
+      detail.innerHTML = renderDetail(types);
+
+      hdr.addEventListener('click', () => {
+        const open = detail.style.display === 'block';
+        detail.style.display = open ? 'none' : 'block';
+        document.getElementById(`rpt-chev-${mi}`).style.transform = open ? '' : 'rotate(180deg)';
+      });
+
+      block.appendChild(hdr);
+      block.appendChild(detail);
+      tableEl.appendChild(block);
     });
 
-    // Grand total
-    html += `<tr style="background:#1d1d1f;color:#fff;border-top:2px solid #1d1d1f">
-      <td colspan="3" style="padding:10px 14px;font-weight:700">Grand Total</td>
-      ${visibleCountries.map(c => `<td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandCountry[c]||0)}</td>`).join('')}
-      <td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandTotal)}</td>
-    </tr>`;
+    // Grand total bar
+    const gtBar = document.createElement('div');
+    gtBar.style.cssText = 'background:#1d1d1f;color:#fff;border-radius:12px;padding:14px 18px;margin-top:8px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap';
+    gtBar.innerHTML = `
+      <span style="font-weight:700;font-size:0.92rem">Grand Total</span>
+      <div style="display:flex;align-items:center;gap:16px;flex-shrink:0">
+        ${visibleCountries.map(c => `
+          <div style="text-align:right">
+            <div style="font-size:0.65rem;color:#888;text-transform:uppercase;letter-spacing:0.04em">${c}</div>
+            <div style="font-size:0.88rem;font-weight:600">${fmt(grandCountry[c]||0)}</div>
+          </div>`).join('')}
+        <div style="text-align:right;border-left:1px solid #444;padding-left:16px">
+          <div style="font-size:0.65rem;color:#888;text-transform:uppercase;letter-spacing:0.04em">Total</div>
+          <div style="font-size:1rem;font-weight:700">${fmt(grandTotal)}</div>
+        </div>
+      </div>`;
+    tableEl.appendChild(gtBar);
 
-    // Fees
+    // Fees footer
     if (totalFees > 0 || totalGst > 0) {
-      html += `<tr style="border-top:1px solid #f0f0f5">
-        <td colspan="3" style="padding:7px 14px;color:#92400e;font-size:0.82rem">Marketplace Fees</td>
-        ${visibleCountries.map(() => `<td></td>`).join('')}
-        <td style="text-align:right;padding:7px 14px;color:#92400e;font-weight:600">${fmt(totalFees)}</td>
-      </tr>
-      <tr style="border-top:1px solid #f0f0f5">
-        <td colspan="3" style="padding:7px 14px;color:#6e6e73;font-size:0.82rem">GST</td>
-        ${visibleCountries.map(() => `<td></td>`).join('')}
-        <td style="text-align:right;padding:7px 14px;color:#6e6e73;font-weight:600">${fmt(totalGst)}</td>
-      </tr>`;
+      const feesBar = document.createElement('div');
+      feesBar.style.cssText = 'background:#fff;border-radius:12px;padding:10px 18px;margin-top:6px;box-shadow:0 1px 4px rgba(0,0,0,0.06);display:flex;gap:24px;align-items:center;flex-wrap:wrap';
+      feesBar.innerHTML = `
+        <span style="font-size:0.72rem;color:#aaa;text-transform:uppercase;letter-spacing:0.04em">Additional charges</span>
+        <span style="font-size:0.85rem">Marketplace Fees <strong style="color:#92400e">${fmt(totalFees)}</strong></span>
+        <span style="font-size:0.85rem">GST <strong style="color:#6e6e73">${fmt(totalGst)}</strong></span>`;
+      tableEl.appendChild(feesBar);
     }
-
-    html += `</tbody></table></div></div>`;
-    document.getElementById('rpt-table').innerHTML = html;
 
     emptyEl.style.display = 'none';
     resultsEl.style.display = 'block';
