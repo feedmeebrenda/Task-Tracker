@@ -449,6 +449,7 @@
         <button class="tab-btn" data-tab="freelancers">Freelancers</button>
         <button class="tab-btn" data-tab="payrun">Pay Run</button>
         <button class="tab-btn" data-tab="add-freelancer">+ Add Freelancer</button>
+        <button class="tab-btn" data-tab="reports">Reports</button>
       </div>
       <button id="admin-lock-btn" class="btn-ghost" style="display:none" onclick="lockAdmin()">🔒 Lock</button>
     </div>
@@ -789,6 +790,41 @@
     </div>
   </div>
 
+  <!-- ═══ TAB: REPORTS ═══ -->
+  <div class="tab-panel" id="tab-reports">
+    <div style="max-width:1100px;margin:0 auto;padding-top:8px">
+      <div class="fl-tab-header"><h2>Upwork Cost Reconciliation</h2></div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div style="display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap">
+          <div style="flex:1;min-width:220px">
+            <label>Upwork Transaction Export (CSV)</label>
+            <div class="file-upload" id="rpt-csv-area" style="padding:12px 16px;margin-bottom:0;text-align:left;display:flex;align-items:center;gap:10px">
+              <input type="file" id="rpt-csv-file" accept=".csv" />
+              <span style="font-size:1.4rem">📊</span>
+              <span id="rpt-csv-label" style="font-size:0.88rem;color:#6e6e73">Click to upload CSV</span>
+            </div>
+          </div>
+          <div>
+            <label>From (payment date)</label>
+            <input type="date" id="rpt-from" style="margin-bottom:0;width:auto" />
+          </div>
+          <div>
+            <label>To (payment date)</label>
+            <input type="date" id="rpt-to" style="margin-bottom:0;width:auto" />
+          </div>
+          <button class="btn" style="width:auto;padding:12px 24px;margin-bottom:2px" onclick="runReport()">Generate Report</button>
+        </div>
+      </div>
+
+      <div id="rpt-empty" style="text-align:center;color:#aaa;padding:40px 0;font-size:0.95rem">Upload a CSV file and click Generate Report.</div>
+      <div id="rpt-results" style="display:none">
+        <div id="rpt-summary" style="margin-bottom:20px"></div>
+        <div id="rpt-table"></div>
+      </div>
+    </div>
+  </div>
+
 </div><!-- /#app -->
 
 <script>
@@ -829,7 +865,7 @@
     'Milyn Lou Sisbreno':'Approval','May Villaflores':'EN Support',
     'Jeffrey Meneses':'EN Redemption','Chau Ngo Bich':'EN Redemption',
   };
-  const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun']);
+  const PROTECTED_TABS = new Set(['entries', 'freelancers', 'payrun', 'reports']);
 
   const HOURLY_PROJECTS = ['Alcohol Matching','Barcode check','Bonus','Data checks','Html templates','OCR label studio','PII redaction','Privacy request','Receipt check','Receipt Count Monitor','Redemption','Support','Support TL Cover Pay','Truth table','User checks','Product matching (ML)'];
   const ADHOC_PROJECTS  = ['Annotation tool','Backlog bonus','Bonus','Email whitelist','Management','Marketing','Missed payment','Night shift bonus','Other (specify below)','Product matching (ML)','Retailer classifier','Training bonus'];
@@ -1604,6 +1640,358 @@
     this.value = '';
     await render();
   });
+
+  /* ══════════════════════════════════════════
+     REPORTS — UPWORK COST RECONCILIATION
+  ══════════════════════════════════════════ */
+
+  // Hourly FL name (Upwork) → management account
+  const HOURLY_FL_MGMT = {
+    'bernard ryan licup':       'Support Cost',
+    'jessa de castro':          'Support Cost',
+    'rhain mitche villanueva':  'Support Cost',
+    'jumana b.':                'Support Cost',
+    'may villaflores':          'Support Cost',
+    'klarence corpuz':          'Redemption processing cost',
+    'mel mark adriano':         'Redemption processing cost',
+    'maricor villaluz':         'Redemption processing cost',
+    'ann fadol':                'Redemption processing cost',
+    'bray bugarin':             'Redemption processing cost',
+    'john joseph apolinar':     'Redemption processing cost',
+  };
+
+  // Fixed country split for hourly (EN Support / EN Redemption)
+  const RPT_COUNTRY_SPLIT = { US: 0.60, CA: 0.25, AU: 0.15 };
+
+  // Display order for management accounts in the report
+  const MGMT_ORDER = [
+    'Data processing BAU',
+    'Data processing One Off',
+    'Redemption processing cost',
+    'Support Cost',
+  ];
+
+  // Normalise management account names from Firestore entries
+  // (older entries may use 'Support' or 'data processing one off' casing)
+  function normMgmt(acct) {
+    const s = (acct || '').toLowerCase().trim();
+    if (s === 'data processing bau')      return 'Data processing BAU';
+    if (s === 'data processing one off')  return 'Data processing One Off';
+    if (s === 'redemption processing cost') return 'Redemption processing cost';
+    if (s === 'support cost' || s === 'support') return 'Support Cost';
+    return acct || 'Other';
+  }
+
+  // Human-readable task type label from a Firestore entry
+  function entryTaskLabel(e) {
+    if (e.taskType === 'approval')         return 'Approval';
+    if (e.taskType === 'email-receipts-3c') return 'Email Receipts 3c';
+    if (e.taskType === 'adhoc' || e.taskType === 'hourly') return e.adhocSubTask || e.taskType;
+    return e.taskType || '—';
+  }
+
+  // Parse date strings from Upwork CSV (e.g. "Jan 5, 2026")
+  function rptDateToISO(s) {
+    if (!s) return '';
+    try { const d = new Date(s); if (!isNaN(d)) return d.toISOString().slice(0, 10); } catch {}
+    return '';
+  }
+
+  // Parse bonus period from Entered description col (e.g. "16-22 April" or "26 Mar - 1 April")
+  function rptParsePeriod(desc, txDateISO) {
+    if (!desc) return null;
+    const year = txDateISO ? new Date(txDateISO).getFullYear() : new Date().getFullYear();
+    const s = desc.trim();
+    // "16-22 April"
+    let m = s.match(/^(\d+)-(\d+)\s+(\w+)/i);
+    if (m) {
+      try {
+        const from = new Date(`${m[3]} ${m[1]}, ${year}`);
+        const to   = new Date(`${m[3]} ${m[2]}, ${year}`);
+        if (!isNaN(from) && !isNaN(to)) return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
+      } catch {}
+    }
+    // "26 Mar - 1 April"
+    m = s.match(/^(\d+)\s+(\w+)\s*[-–]\s*(\d+)\s+(\w+)/i);
+    if (m) {
+      try {
+        const from = new Date(`${m[2]} ${m[1]}, ${year}`);
+        let   to   = new Date(`${m[4]} ${m[3]}, ${year}`);
+        if (!isNaN(from) && !isNaN(to)) {
+          if (from > to) to = new Date(`${m[4]} ${m[3]}, ${year + 1}`);
+          return { from: from.toISOString().slice(0,10), to: to.toISOString().slice(0,10) };
+        }
+      } catch {}
+    }
+    return null;
+  }
+
+  // Parse the raw Upwork CSV export (cols A–T, no pre-computed Payment Ref ID col)
+  // Returns: array of payment objects, each with .date, .amount, .transactions[]
+  function parseUpworkExport(text) {
+    const rows = parseFullCSV(text);
+    if (rows.length < 2) return [];
+
+    // Map each data row to a plain object
+    const data = rows.slice(1).map(r => ({
+      date:        r[0]?.trim()  || '',
+      txId:        r[1]?.trim()  || '',
+      type:        r[2]?.trim()  || '',
+      enteredDesc: r[8]?.trim()  || '',
+      freelancer:  r[10]?.trim() || '',
+      refId:       r[14]?.trim() || '',
+      amount:      parseFloat(r[15]) || 0,
+    })).filter(r => r.type);
+
+    // Group charges between consecutive Payment rows.
+    // Charges appear BEFORE their Payment row in the file.
+    const payments = [];
+    let pending = [];
+
+    data.forEach(row => {
+      if (row.type === 'Payment') {
+        // everything accumulated so far belongs to this payment
+        const dateISO = rptDateToISO(row.date);
+        // Group pending rows by Transaction ID
+        const txMap = {};
+        pending.forEach(c => {
+          if (!c.txId) return;
+          if (!txMap[c.txId]) txMap[c.txId] = [];
+          txMap[c.txId].push(c);
+        });
+        const transactions = Object.values(txMap).map(rows => {
+          const main = rows.find(r => r.type === 'Bonus' || r.type === 'Hourly');
+          const fee  = rows.find(r => r.type === 'Marketplace Fee');
+          const gst  = rows.find(r => r.type === 'GST');
+          if (!main) return null;
+          return {
+            type:        main.type,
+            freelancer:  main.freelancer,
+            enteredDesc: main.enteredDesc,
+            date:        rptDateToISO(main.date),
+            base:        Math.abs(main.amount),
+            fee:         Math.abs(fee?.amount || 0),
+            gst:         Math.abs(gst?.amount || 0),
+          };
+        }).filter(Boolean);
+
+        payments.push({ date: dateISO, amount: row.amount, transactions });
+        pending = [];
+      } else {
+        pending.push(row);
+      }
+    });
+
+    return payments;
+  }
+
+  // Stored parsed CSV data
+  let _rptCsvData = null;
+
+  document.getElementById('rpt-csv-file').addEventListener('change', function() {
+    const f = this.files[0];
+    if (!f) return;
+    document.getElementById('rpt-csv-label').textContent = '✓ ' + f.name;
+    document.getElementById('rpt-csv-area').classList.add('has-file');
+    const reader = new FileReader();
+    reader.onload = e => { _rptCsvData = parseUpworkExport(e.target.result); };
+    reader.readAsText(f);
+  });
+
+  async function runReport() {
+    const emptyEl   = document.getElementById('rpt-empty');
+    const resultsEl = document.getElementById('rpt-results');
+    if (!_rptCsvData) { alert('Please upload a CSV file first.'); return; }
+
+    const from = document.getElementById('rpt-from').value;
+    const to   = document.getElementById('rpt-to').value;
+
+    // Filter payments by payment date
+    let payments = _rptCsvData;
+    if (from) payments = payments.filter(p => p.date >= from);
+    if (to)   payments = payments.filter(p => p.date <= to);
+
+    if (!payments.length) {
+      emptyEl.textContent = 'No payments found in the selected date range.';
+      emptyEl.style.display = ''; resultsEl.style.display = 'none'; return;
+    }
+
+    // Load all tracker entries (no date filter — bonus periods can span month boundaries)
+    const allEntries = await loadEntries();
+    const entriesByName = {};
+    allEntries.forEach(e => {
+      const key = (e.nameSnapshot || '').toLowerCase().trim();
+      if (key) (entriesByName[key] = entriesByName[key] || []).push(e);
+    });
+
+    // reportData[mgmtAcct][type]['Tracker'|'Hourly'][taskLabel][country] += amount
+    // We use a nested structure: mgmtAcct → { Tracker: { taskLabel: { US, CA, AU, Unknown } }, Hourly: { ... } }
+    const reportData = {};
+    let totalUpworkPaid = 0, totalFees = 0, totalGst = 0;
+    let totalTrackerCalc = 0, totalHourlyBase = 0;
+
+    function ensureCell(mgmt, srcType, taskLabel) {
+      if (!reportData[mgmt]) reportData[mgmt] = {};
+      if (!reportData[mgmt][srcType]) reportData[mgmt][srcType] = {};
+      if (!reportData[mgmt][srcType][taskLabel]) reportData[mgmt][srcType][taskLabel] = { US:0, CA:0, AU:0, Unknown:0 };
+      return reportData[mgmt][srcType][taskLabel];
+    }
+
+    payments.forEach(p => {
+      totalUpworkPaid += p.amount;
+      p.transactions.forEach(t => {
+        totalFees += t.fee;
+        totalGst  += t.gst;
+
+        if (t.type === 'Hourly') {
+          const mgmt = HOURLY_FL_MGMT[t.freelancer.toLowerCase().trim()];
+          if (!mgmt) return; // skip unknown (e.g. BR Redemption)
+          totalHourlyBase += t.base;
+          Object.entries(RPT_COUNTRY_SPLIT).forEach(([c, pct]) => {
+            ensureCell(mgmt, 'Hourly', 'Hourly')[c] += t.base * pct;
+          });
+
+        } else if (t.type === 'Bonus') {
+          const period  = rptParsePeriod(t.enteredDesc, t.date);
+          const flKey   = t.freelancer.toLowerCase().trim();
+          const entries = (entriesByName[flKey] || []).filter(e =>
+            period ? (e.date >= period.from && e.date <= period.to) : false
+          );
+          entries.forEach(e => {
+            const mgmt    = normMgmt(e.managementAccount);
+            const task    = entryTaskLabel(e);
+            const country = ['US','CA','AU'].includes((e.country||'').toUpperCase())
+              ? e.country.toUpperCase() : 'Unknown';
+            const amt = e.amount || 0;
+            ensureCell(mgmt, 'Tracker', task)[country] += amt;
+            totalTrackerCalc += amt;
+          });
+        }
+      });
+    });
+
+    // Render summary cards
+    const summaryEl = document.getElementById('rpt-summary');
+    const cards = [
+      { label: 'Upwork Payments Total', val: fmt(totalUpworkPaid),   color: '#1d1d1f' },
+      { label: 'Tracker Calculated',    val: fmt(totalTrackerCalc),  color: '#1a7f3c', note: 'from entries' },
+      { label: 'Hourly Base',           val: fmt(totalHourlyBase),   color: '#1e40af', note: 'EN Support + Redemption' },
+      { label: 'Marketplace Fees',      val: fmt(totalFees),         color: '#92400e' },
+      { label: 'GST',                   val: fmt(totalGst),          color: '#6e6e73' },
+    ];
+    summaryEl.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px">` +
+      cards.map(c => `
+        <div style="background:#fff;border-radius:12px;padding:16px 20px;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+          <div style="font-size:0.7rem;font-weight:700;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73;margin-bottom:4px">${c.label}</div>
+          <div style="font-size:1.25rem;font-weight:800;color:${c.color}">${c.val}</div>
+          ${c.note ? `<div style="font-size:0.72rem;color:#aaa;margin-top:2px">${c.note}</div>` : ''}
+        </div>`).join('') + `</div>`;
+
+    // Render main report table
+    const COUNTRIES = ['US', 'CA', 'AU', 'Unknown'];
+    const visibleCountries = COUNTRIES.filter(c =>
+      Object.values(reportData).some(types =>
+        Object.values(types).some(tasks =>
+          Object.values(tasks).some(cell => (cell[c] || 0) > 0)
+        )
+      )
+    );
+
+    const colCount = 3 + visibleCountries.length; // mgmt + type + task + countries + total
+
+    let html = `
+      <div style="background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.08)">
+      <div style="overflow-x:auto"><table style="font-size:0.85rem;width:100%">
+      <thead><tr style="background:#f5f5f7">
+        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Management Account</th>
+        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Type</th>
+        <th style="text-align:left;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Task Type</th>
+        ${visibleCountries.map(c => `<th style="text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">${c}</th>`).join('')}
+        <th style="text-align:right;padding:10px 14px;font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:#6e6e73">Total</th>
+      </tr></thead><tbody>`;
+
+    // Sum a cell across selected countries
+    const cellTotal = cell => visibleCountries.reduce((s, c) => s + (cell[c] || 0), 0);
+
+    // Ordered management accounts (known ones first, then any unexpected extras)
+    const allMgmts = [...new Set([...MGMT_ORDER, ...Object.keys(reportData)])].filter(m => reportData[m]);
+
+    const grandCountry = {};
+    visibleCountries.forEach(c => grandCountry[c] = 0);
+    let grandTotal = 0;
+
+    allMgmts.forEach((mgmt, mi) => {
+      const types = reportData[mgmt];
+      const mgmtCountry = {};
+      visibleCountries.forEach(c => mgmtCountry[c] = 0);
+      let mgmtTotal = 0;
+
+      // Section header row for management account
+      html += `<tr style="background:#f0f4ff;border-top:2px solid #e0e0e5">
+        <td colspan="${colCount + 1}" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1d1d1f">${esc(mgmt)}</td>
+      </tr>`;
+
+      // Type order: Tracker first, then Hourly
+      const typeOrder = ['Tracker', 'Hourly'].filter(t => types[t]);
+      typeOrder.forEach(srcType => {
+        const tasks = types[srcType];
+        const taskLabels = Object.keys(tasks).sort();
+
+        taskLabels.forEach((task, ti) => {
+          const cell = tasks[task];
+          const tot  = cellTotal(cell);
+          visibleCountries.forEach(c => mgmtCountry[c] += (cell[c] || 0));
+          mgmtTotal += tot;
+
+          const isFirstTask = ti === 0;
+          html += `<tr style="border-top:1px solid #f0f0f5">
+            ${isFirstTask
+              ? `<td style="padding:7px 14px;color:#6e6e73;font-size:0.8rem">${esc(srcType)}</td>`
+              : `<td style="padding:7px 14px"></td>`}
+            <td style="padding:7px 14px;font-size:0.82rem">${esc(task)}</td>
+            ${visibleCountries.map(c => `<td style="text-align:right;padding:7px 14px;white-space:nowrap">${(cell[c]||0) > 0 ? fmt(cell[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
+            <td style="text-align:right;padding:7px 14px;font-weight:600;white-space:nowrap">${fmt(tot)}</td>
+          </tr>`;
+        });
+      });
+
+      // Management account subtotal row
+      visibleCountries.forEach(c => grandCountry[c] = (grandCountry[c] || 0) + mgmtCountry[c]);
+      grandTotal += mgmtTotal;
+      html += `<tr style="background:#f8f8fb;border-top:1.5px solid #e0e0e5">
+        <td colspan="2" style="padding:8px 14px;font-weight:700;font-size:0.82rem;color:#1d1d1f">Subtotal</td>
+        ${visibleCountries.map(c => `<td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${mgmtCountry[c] > 0 ? fmt(mgmtCountry[c]) : '<span style="color:#ddd">—</span>'}</td>`).join('')}
+        <td style="text-align:right;padding:8px 14px;font-weight:700;white-space:nowrap">${fmt(mgmtTotal)}</td>
+      </tr>`;
+    });
+
+    // Grand total row
+    html += `<tr style="background:#1d1d1f;color:#fff;border-top:2px solid #1d1d1f">
+      <td colspan="2" style="padding:10px 14px;font-weight:700">Grand Total</td>
+      ${visibleCountries.map(c => `<td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandCountry[c] || 0)}</td>`).join('')}
+      <td style="text-align:right;padding:10px 14px;font-weight:700;white-space:nowrap">${fmt(grandTotal)}</td>
+    </tr>`;
+
+    // Fees rows
+    if (totalFees > 0 || totalGst > 0) {
+      html += `<tr style="border-top:1px solid #f0f0f5">
+        <td colspan="2" style="padding:7px 14px;color:#92400e;font-size:0.82rem">Marketplace Fees</td>
+        ${visibleCountries.map(() => `<td></td>`).join('')}
+        <td style="text-align:right;padding:7px 14px;color:#92400e;font-weight:600">${fmt(totalFees)}</td>
+      </tr>
+      <tr style="border-top:1px solid #f0f0f5">
+        <td colspan="2" style="padding:7px 14px;color:#6e6e73;font-size:0.82rem">GST</td>
+        ${visibleCountries.map(() => `<td></td>`).join('')}
+        <td style="text-align:right;padding:7px 14px;color:#6e6e73;font-weight:600">${fmt(totalGst)}</td>
+      </tr>`;
+    }
+
+    html += `</tbody></table></div></div>`;
+    document.getElementById('rpt-table').innerHTML = html;
+
+    emptyEl.style.display = 'none';
+    resultsEl.style.display = 'block';
+  }
 
   /* ══════════════════════════════════════════
      INIT
